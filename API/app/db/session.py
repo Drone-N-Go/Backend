@@ -12,13 +12,25 @@ from app.core.config import get_settings
 settings = get_settings()
 
 # ---------------------------------------------------------------------------
+# Normalize DATABASE_URL
+# Railway's Raw Editor can inject "DATABASE_URL=postgresql://..." as the
+# value itself — strip the prefix and fix the driver name if needed.
+# ---------------------------------------------------------------------------
+_db_url = settings.database_url
+
+if _db_url.startswith("DATABASE_URL="):
+    _db_url = _db_url[len("DATABASE_URL="):]
+
+if _db_url.startswith("postgresql://"):
+    _db_url = _db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+
+# ---------------------------------------------------------------------------
 # Engine
-# echo=False in production; flip to True for SQL query logging in dev.
 # ---------------------------------------------------------------------------
 engine = create_async_engine(
-    settings.database_url,
+    _db_url,
     echo=settings.app_env == "development",
-    pool_pre_ping=True,          # Reconnect on stale connections
+    pool_pre_ping=True,
     pool_size=10,
     max_overflow=20,
 )
