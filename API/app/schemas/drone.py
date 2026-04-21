@@ -8,7 +8,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 # ---------------------------------------------------------------------------
@@ -16,6 +16,8 @@ from pydantic import BaseModel, Field
 # ---------------------------------------------------------------------------
 
 class DroneCreateRequest(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
     model_name: str = Field(..., min_length=1, max_length=255)
     serial_number: str = Field(..., min_length=1, max_length=255)
     assigned_locker_location_id: Optional[str] = None
@@ -40,6 +42,8 @@ class DroneStatusRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 class DroneResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True, protected_namespaces=())
+
     id: str
     model_name: str
     serial_number: str
@@ -49,8 +53,6 @@ class DroneResponse(BaseModel):
     daily_rate: Decimal
     created_at: datetime
     updated_at: datetime
-
-    model_config = {"from_attributes": True}
 
 
 class DroneListResponse(BaseModel):

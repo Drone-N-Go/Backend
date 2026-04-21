@@ -50,7 +50,7 @@ settings = get_settings()
 # Startup / shutdown lifecycle
 # --------------------------------------------------------------------------- #
 
-async def _run_migrations() -> None:
+def _run_migrations() -> None:
     """Run Alembic migrations synchronously (one-time on startup)."""
     try:
         alembic_cfg = Config("alembic.ini")
@@ -86,7 +86,7 @@ async def _seed_admin() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("🚀  Drone N' Go API starting up...")
-    await _run_migrations()
+    _run_migrations()          # sync — runs in the current thread
     await _seed_admin()
     yield
     logger.info("🛑  Drone N' Go API shutting down.")
