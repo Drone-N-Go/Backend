@@ -18,8 +18,16 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 from dotenv import load_dotenv
 load_dotenv()
 
-# Import Base so all models are registered
+# Import Base and all models so Alembic can discover them
 from app.db.base import Base  # noqa: E402
+from app.models.user import User                        # noqa: F401, E402
+from app.models.drone import Drone                      # noqa: F401, E402
+from app.models.locker_location import LockerLocation   # noqa: F401, E402
+from app.models.locker_unit import LockerUnit           # noqa: F401, E402
+from app.models.booking import Booking                  # noqa: F401, E402
+from app.models.damage_report import DamageReport       # noqa: F401, E402
+from app.models.smiota_event import SmiotaEvent         # noqa: F401, E402
+from app.models.login_attempt import LoginAttempt       # noqa: F401, E402
 
 config = context.config
 

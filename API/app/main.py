@@ -24,6 +24,20 @@ from app.core.security import hash_password
 from app.db.session import AsyncSessionLocal
 from app.models.user import User
 
+# ---------------------------------------------------------------------------
+# Import all models here so SQLAlchemy registers them with the metadata.
+# This must happen before Alembic runs migrations.
+# ---------------------------------------------------------------------------
+from app.models import (  # noqa: F401
+    booking,
+    damage_report,
+    drone,
+    locker_location,
+    locker_unit,
+    login_attempt,
+    smiota_event,
+)
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
