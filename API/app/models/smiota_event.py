@@ -26,6 +26,7 @@ class SmiotaEvent(Base):
     locker_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     passcode: Mapped[str | None] = mapped_column(String(50), nullable=True)
     courier_code: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    tracking_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     raw_payload: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     processed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     created_at: Mapped[datetime] = mapped_column(

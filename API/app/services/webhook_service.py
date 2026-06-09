@@ -42,11 +42,17 @@ def verify_smiota_auth(request: Request) -> None:
 
     try:
         decoded = base64.b64decode(auth_header[6:]).decode("utf-8")
-        api_key, *_ = decoded.split(":", maxsplit=1)
+        api_key, password = decoded.split(":", maxsplit=1)
     except Exception:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Malformed Basic Auth credentials.",
+        )
+
+    if password != "":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid Basic Auth password.",
         )
 
     try:
@@ -86,6 +92,7 @@ async def process_smiota_webhook(
         locker_name=body.lockerName,
         passcode=body.passcode,
         courier_code=body.courierCode,
+        tracking_id=body.trackingID,
         raw_payload=body.model_dump(),
         processed=False,
     )

@@ -308,7 +308,8 @@ Smiota locker event receiver. Auth: HTTP Basic (`SMIOTA_API_KEY` as username).
   "objectId": "smiota-obj-abc123",
   "lockerName": "Locker-A3",
   "passcode": "849201",
-  "courierCode": "COUR-XYZ"
+  "courierCode": "COUR-XYZ",
+  "trackingID": "TRK-9876543210"
 }
 ```
 

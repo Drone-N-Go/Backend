@@ -15,6 +15,7 @@ class SmiotaWebhookRequest(BaseModel):
     lockerName: Optional[str] = None
     passcode: Optional[str] = None
     courierCode: Optional[str] = None
+    trackingID: Optional[str] = None
 
 
 class SmiotaWebhookResponse(BaseModel):

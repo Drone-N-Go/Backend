@@ -35,7 +35,8 @@ Configure your `SMIOTA_API_KEY` in `.env`. Provide this key to Smiota when setti
   "objectId": "smiota-obj-abc123",
   "lockerName": "Locker-A3",
   "passcode": "849201",
-  "courierCode": "COUR-XYZ"
+  "courierCode": "COUR-XYZ",
+  "trackingID": "TRK-9876543210"
 }
 ```
 
@@ -46,6 +47,7 @@ Configure your `SMIOTA_API_KEY` in `.env`. Provide this key to Smiota when setti
 | `lockerName` | string | Human-readable locker name |
 | `passcode` | string | Numeric passcode for locker access |
 | `courierCode` | string | Optional courier/delivery code |
+| `trackingID` | string | Optional Smiota tracking ID |
 
 ---
 
@@ -55,6 +57,7 @@ Configure your `SMIOTA_API_KEY` in `.env`. Provide this key to Smiota when setti
 Triggered when staff deposits a drone into the locker.
 
 - Stores `passcode`, `lockerName`, and `courierCode` on the booking
+- Stores `trackingID` in the Smiota event audit log
 - Moves booking `reserved` → `ready_for_pickup`
 - User can now call `GET /api/bookings/{id}/passcode` to retrieve their code
 
@@ -115,7 +118,8 @@ curl -X POST http://localhost:8000/api/webhooks/smiota \
     "objectId": "smiota-obj-abc123",
     "lockerName": "Locker-A3",
     "passcode": "849201",
-    "courierCode": "COUR-XYZ"
+    "courierCode": "COUR-XYZ",
+    "trackingID": "TRK-9876543210"
   }'
 ```
 
