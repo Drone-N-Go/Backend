@@ -22,17 +22,21 @@ load_dotenv()
 from app.db.base import Base  # noqa: E402
 from app.models.user import User                        # noqa: F401, E402
 from app.models.drone import Drone                      # noqa: F401, E402
+from app.models.drone_favorite import DroneFavorite     # noqa: F401, E402
 from app.models.locker_location import LockerLocation   # noqa: F401, E402
 from app.models.locker_unit import LockerUnit           # noqa: F401, E402
 from app.models.booking import Booking                  # noqa: F401, E402
 from app.models.damage_report import DamageReport       # noqa: F401, E402
 from app.models.smiota_event import SmiotaEvent         # noqa: F401, E402
 from app.models.login_attempt import LoginAttempt       # noqa: F401, E402
+from app.models.refresh_token import RefreshToken       # noqa: F401, E402
 
 config = context.config
 
 # Override sqlalchemy.url with the real DATABASE_URL from env
 database_url = os.environ.get("DATABASE_URL", "")
+if database_url.startswith("postgresql://"):
+    database_url = database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
 config.set_main_option("sqlalchemy.url", database_url)
 
 if config.config_file_name is not None:

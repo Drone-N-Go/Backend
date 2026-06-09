@@ -12,6 +12,7 @@ from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Integer, Numeric, 
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.core.booking_lifecycle import BOOKING_STATUSES
 from app.db.base import Base
 
 
@@ -42,7 +43,7 @@ class Booking(Base):
     rental_duration: Mapped[int] = mapped_column(Integer, nullable=False)
     rental_type: Mapped[str] = mapped_column(String(10), nullable=False)
     status: Mapped[str] = mapped_column(
-        String(20), nullable=False, default="pending", server_default="pending"
+        String(30), nullable=False, default="reserved", server_default="reserved"
     )
     total_cost: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
 
@@ -51,6 +52,18 @@ class Booking(Base):
     smiota_passcode: Mapped[str | None] = mapped_column(String(50), nullable=True)
     smiota_locker_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     smiota_courier_code: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    ready_for_pickup_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    locker_opened_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    case_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    before_photos_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    in_use_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    return_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    after_photos_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    return_locker_opened_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    return_video_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    returned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
@@ -64,7 +77,7 @@ class Booking(Base):
 
     __table_args__ = (
         CheckConstraint(
-            "status IN ('pending', 'active', 'completed', 'cancelled')",
+            f"status IN {BOOKING_STATUSES}",
             name="ck_booking_status",
         ),
         CheckConstraint(

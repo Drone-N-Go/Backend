@@ -1,6 +1,6 @@
 # Drone N' Go API
 
-The backend REST API powering **Drone N' Go** — a drone rental platform built on FastAPI, PostgreSQL (Railway), and Smiota smart lockers.
+The backend REST API powering **Drone N' Go** — a drone rental platform built on FastAPI, Supabase Postgres, Render, and Smiota smart lockers.
 
 ---
 
@@ -18,7 +18,7 @@ The backend REST API powering **Drone N' Go** — a drone rental platform built 
 - [Smiota Webhook](#smiota-webhook)
 - [Image Uploads (AWS S3)](#image-uploads-aws-s3)
 - [Database Migrations](#database-migrations)
-- [Deployment (Railway)](#deployment-railway)
+- [Deployment (Render + Supabase)](#deployment-render--supabase)
 - [Further Reading](#further-reading)
 
 ---
@@ -42,7 +42,7 @@ Drone N' Go allows users to rent drones from smart locker stations on university
 |---|---|
 | Framework | FastAPI 0.111 |
 | Language | Python 3.11+ |
-| Database | PostgreSQL (Railway) |
+| Database | Supabase PostgreSQL |
 | ORM | SQLAlchemy 2.0 (async) |
 | Migrations | Alembic |
 | Auth | JWT (PyJWT) + bcrypt |
@@ -92,7 +92,7 @@ API/
 ### Prerequisites
 
 - Python 3.11+
-- A Railway PostgreSQL database (or any PostgreSQL 14+ instance)
+- A Supabase PostgreSQL database
 - AWS S3 bucket
 - Smiota API key
 
@@ -125,7 +125,7 @@ Copy `.env.example` to `.env` and fill in every value. See [docs/environment-var
 
 | Variable | Description |
 |---|---|
-| `DATABASE_URL` | Railway PostgreSQL URL (must use `postgresql+asyncpg://`) |
+| `DATABASE_URL` | Supabase PostgreSQL URL |
 | `JWT_SECRET` | 64-char hex secret for signing JWTs |
 | `ADMIN_EMAIL` | Seed admin account email |
 | `ADMIN_PASSWORD` | Seed admin account password |
@@ -215,7 +215,16 @@ See [docs/endpoints.md](docs/endpoints.md) for the full reference.
 | `POST` | `/api/bookings` | User | Create booking |
 | `GET` | `/api/bookings` | User | List own bookings |
 | `GET` | `/api/bookings/{id}/passcode` | User | Get locker passcode |
-| `POST` | `/api/bookings/{id}/return` | User | Return drone |
+| `POST` | `/api/bookings/{id}/locker-opened` | User | Mark pickup locker opened |
+| `POST` | `/api/bookings/{id}/case-verified` | User | Mark pickup QR/case verified |
+| `POST` | `/api/bookings/{id}/before-photos/complete` | User | Complete pre-rental photo step |
+| `POST` | `/api/bookings/{id}/start-use` | User | Start active rental use |
+| `POST` | `/api/bookings/{id}/return/start` | User | Start return flow |
+| `POST` | `/api/bookings/{id}/after-photos/complete` | User | Complete post-rental photo step |
+| `POST` | `/api/bookings/{id}/return-locker-opened` | User | Mark return locker opened |
+| `POST` | `/api/bookings/{id}/return-video` | User | Upload return video |
+| `POST` | `/api/bookings/{id}/return-video/complete` | User | Complete return video step |
+| `POST` | `/api/bookings/{id}/complete-return` | User | Complete return |
 | `POST` | `/api/bookings/{id}/images/pre-rental` | User | Upload pre-rental images |
 | `POST` | `/api/bookings/{id}/images/post-rental` | User | Upload post-rental images |
 | `POST` | `/api/webhooks/smiota` | Basic Auth | Smiota locker event |
@@ -230,22 +239,9 @@ See [docs/smiota-webhook.md](docs/smiota-webhook.md) for full integration detail
 
 Smiota sends `POST` requests to `/api/webhooks/smiota` when:
 - `PackageDeposited` — drone placed in locker (passcode is stored on the booking)
-- `PackagePickedUp` — user picks up the drone (booking goes `active`)
+- `PackagePickedUp` — user picks up the drone; event is recorded without skipping app verification
 
-**Developer console output** — during testing, the following is printed to your terminal:
-
-```
-============================================================
-  ***CHECKOUT TOKEN*** : 849201
-  Booking ID          : abc-123-...
-  Locker Name         : Locker-A3
-============================================================
-
-============================================================
-  ***RETURNING TOKEN*** : 849201
-  Booking ID          : abc-123-...
-============================================================
-```
+Passcodes are available only through the authenticated `GET /api/bookings/{id}/passcode` endpoint.
 
 ---
 
@@ -277,9 +273,9 @@ make downgrade
 
 ---
 
-## Deployment (Railway)
+## Deployment (Render + Supabase)
 
-See [docs/deployment.md](docs/deployment.md) for step-by-step Railway deployment instructions.
+See [docs/deployment.md](docs/deployment.md) for step-by-step Render + Supabase deployment instructions.
 
 ---
 
@@ -289,4 +285,4 @@ See [docs/deployment.md](docs/deployment.md) for step-by-step Railway deployment
 - [docs/environment-variables.md](docs/environment-variables.md) — All env vars explained
 - [docs/aws-s3-setup.md](docs/aws-s3-setup.md) — AWS S3 bucket setup
 - [docs/smiota-webhook.md](docs/smiota-webhook.md) — Smiota integration guide
-- [docs/deployment.md](docs/deployment.md) — Railway deployment guide
+- [docs/deployment.md](docs/deployment.md) — Render + Supabase deployment guide

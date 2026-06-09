@@ -69,6 +69,23 @@ async def get_current_user(
     return await _resolve_user_from_token(token, db)
 
 
+async def get_optional_user(
+    access_token: str | None = Cookie(default=None),
+    authorization: str | None = Header(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> User | None:
+    token: str | None = None
+    if access_token:
+        token = access_token
+    elif authorization and authorization.startswith("Bearer "):
+        token = authorization.split(" ", 1)[1]
+
+    if not token:
+        return None
+
+    return await _resolve_user_from_token(token, db)
+
+
 async def require_admin(
     current_user: User = Depends(get_current_user),
 ) -> User:

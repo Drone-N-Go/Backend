@@ -44,6 +44,10 @@ class DamageReport(Base):
     post_rental_images: Mapped[list] = mapped_column(
         ARRAY(String), nullable=False, server_default="{}"
     )
+    return_video_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    return_video_uploaded_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     admin_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     condition_status: Mapped[str] = mapped_column(
         String(20), nullable=False, default="needs_review", server_default="needs_review"

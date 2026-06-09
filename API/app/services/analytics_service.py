@@ -48,7 +48,7 @@ async def get_analytics(days: int, db: AsyncSession) -> AnalyticsResponse:
     total_revenue = (
         await db.execute(
             select(func.coalesce(func.sum(Booking.total_cost), 0)).where(
-                Booking.status == "completed"
+                Booking.status == "returned"
             )
         )
     ).scalar_one()
@@ -56,7 +56,7 @@ async def get_analytics(days: int, db: AsyncSession) -> AnalyticsResponse:
     period_revenue = (
         await db.execute(
             select(func.coalesce(func.sum(Booking.total_cost), 0)).where(
-                Booking.status == "completed", Booking.created_at >= since
+                Booking.status == "returned", Booking.created_at >= since
             )
         )
     ).scalar_one()
@@ -100,9 +100,17 @@ async def get_analytics(days: int, db: AsyncSession) -> AnalyticsResponse:
     status_map = {row.status: row.cnt for row in status_rows}
 
     booking_status = BookingStatusBreakdown(
-        pending=status_map.get("pending", 0),
-        active=status_map.get("active", 0),
-        completed=status_map.get("completed", 0),
+        reserved=status_map.get("reserved", 0),
+        ready_for_pickup=status_map.get("ready_for_pickup", 0),
+        locker_opened=status_map.get("locker_opened", 0),
+        case_verified=status_map.get("case_verified", 0),
+        before_photos_complete=status_map.get("before_photos_complete", 0),
+        in_use=status_map.get("in_use", 0),
+        return_started=status_map.get("return_started", 0),
+        after_photos_complete=status_map.get("after_photos_complete", 0),
+        return_locker_opened=status_map.get("return_locker_opened", 0),
+        return_video_complete=status_map.get("return_video_complete", 0),
+        returned=status_map.get("returned", 0),
         cancelled=status_map.get("cancelled", 0),
     )
 
@@ -118,7 +126,7 @@ async def get_analytics(days: int, db: AsyncSession) -> AnalyticsResponse:
                 func.count(Booking.id).label("booking_count"),
             )
             .outerjoin(Booking, Booking.location_id == LockerLocation.id)
-            .where((Booking.status == "completed") | (Booking.id == None))  # noqa: E711
+            .where((Booking.status == "returned") | (Booking.id == None))  # noqa: E711
             .group_by(LockerLocation.id, LockerLocation.campus_name)
         )
     ).all()

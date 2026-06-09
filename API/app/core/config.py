@@ -8,7 +8,7 @@ All values are read from environment variables / .env file.
 from functools import lru_cache
 from typing import List
 
-from pydantic import field_validator
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -78,6 +78,34 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.app_env == "production"
+
+    @model_validator(mode="after")
+    def validate_production_safety(self):
+        placeholders = (
+            "REPLACE_WITH",
+            "YOUR_",
+            "USER:PASSWORD",
+        )
+        sensitive_values = {
+            "database_url": self.database_url,
+            "jwt_secret": self.jwt_secret,
+            "admin_password": self.admin_password,
+            "smiota_api_key": self.smiota_api_key,
+            "aws_access_key_id": self.aws_access_key_id,
+            "aws_secret_access_key": self.aws_secret_access_key,
+            "aws_s3_bucket": self.aws_s3_bucket,
+        }
+        for name, value in sensitive_values.items():
+            if any(marker in value for marker in placeholders):
+                raise ValueError(f"{name} still contains a placeholder value.")
+
+        if len(self.jwt_secret) < 64:
+            raise ValueError("JWT_SECRET must be at least 64 characters.")
+
+        if self.is_production and self.cors_origins == "*":
+            raise ValueError("CORS_ORIGINS cannot be '*' when APP_ENV=production.")
+
+        return self
 
 
 @lru_cache()

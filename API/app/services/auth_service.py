@@ -6,10 +6,11 @@ Business logic for authentication:
 """
 
 import logging
+import hashlib
 from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException, Request, status
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -21,6 +22,7 @@ from app.core.security import (
     verify_password,
 )
 from app.models.login_attempt import LoginAttempt
+from app.models.refresh_token import RefreshToken
 from app.models.user import User
 from app.schemas.user import (
     AdminCreateRequest,
@@ -37,9 +39,22 @@ settings = get_settings()
 # Helpers
 # --------------------------------------------------------------------------- #
 
-def _build_token_response(user: User) -> TokenResponse:
+def _hash_token(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+async def _build_token_response(user: User, db: AsyncSession) -> TokenResponse:
     access_token = create_access_token(user.id, user.email)
     refresh_token = create_refresh_token(user.id)
+    expires_at = datetime.now(timezone.utc) + timedelta(days=settings.refresh_token_expire_days)
+    db.add(
+        RefreshToken(
+            user_id=user.id,
+            token_hash=_hash_token(refresh_token),
+            expires_at=expires_at,
+        )
+    )
+    await db.flush()
     return TokenResponse(
         access_token=access_token,
         refresh_token=refresh_token,
@@ -85,7 +100,7 @@ async def register_user(body: UserRegisterRequest, db: AsyncSession) -> TokenRes
     db.add(user)
     await db.flush()
     logger.info("New user registered: %s", user.email)
-    return _build_token_response(user)
+    return await _build_token_response(user, db)
 
 
 async def login_user(
@@ -139,7 +154,7 @@ async def login_user(
     await db.flush()
 
     logger.info("User logged in: %s", user.email)
-    return _build_token_response(user)
+    return await _build_token_response(user, db)
 
 
 async def refresh_access_token(refresh_token: str, db: AsyncSession) -> TokenResponse:
@@ -152,6 +167,31 @@ async def refresh_access_token(refresh_token: str, db: AsyncSession) -> TokenRes
         )
 
     user_id = payload.get("sub")
+    token_hash = _hash_token(refresh_token)
+    token_result = await db.execute(
+        select(RefreshToken).where(RefreshToken.token_hash == token_hash)
+    )
+    token_record = token_result.scalar_one_or_none()
+    if not token_record:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired refresh token.",
+        )
+
+    expires_at = token_record.expires_at
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+
+    if (
+        token_record.revoked
+        or expires_at <= datetime.now(timezone.utc)
+        or token_record.user_id != user_id
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired refresh token.",
+        )
+
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
 
@@ -161,7 +201,27 @@ async def refresh_access_token(refresh_token: str, db: AsyncSession) -> TokenRes
             detail="User not found.",
         )
 
-    return _build_token_response(user)
+    token_record.revoked = True
+    token_record.revoked_at = datetime.now(timezone.utc)
+    db.add(token_record)
+    await db.flush()
+
+    return await _build_token_response(user, db)
+
+
+async def revoke_refresh_token(refresh_token: str | None, db: AsyncSession) -> None:
+    if not refresh_token:
+        return
+    result = await db.execute(
+        select(RefreshToken).where(RefreshToken.token_hash == _hash_token(refresh_token))
+    )
+    token_record = result.scalar_one_or_none()
+    if not token_record or token_record.revoked:
+        return
+    token_record.revoked = True
+    token_record.revoked_at = datetime.now(timezone.utc)
+    db.add(token_record)
+    await db.flush()
 
 
 async def create_admin_account(body: AdminCreateRequest, db: AsyncSession) -> User:

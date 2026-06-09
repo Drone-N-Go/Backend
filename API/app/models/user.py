@@ -48,3 +48,9 @@ class User(Base):
 
     # Relationships
     bookings: Mapped[list["Booking"]] = relationship("Booking", back_populates="user", lazy="select")  # noqa: F821
+    favorite_drones: Mapped[list["DroneFavorite"]] = relationship(  # noqa: F821
+        "DroneFavorite", back_populates="user", cascade="all, delete-orphan"
+    )
+    refresh_tokens: Mapped[list["RefreshToken"]] = relationship(  # noqa: F821
+        "RefreshToken", back_populates="user", cascade="all, delete-orphan"
+    )

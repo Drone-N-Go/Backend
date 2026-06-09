@@ -234,7 +234,7 @@ Cancel a booking. Frees the drone back to `available`.
 Manually update booking status. Requires: `Admin`.
 
 ```json
-{ "status": "active" }
+{ "status": "in_use" }
 ```
 
 ---
@@ -258,13 +258,38 @@ Upload post-rental drone condition images. `multipart/form-data`, field: `files`
 
 ---
 
+### `POST /api/bookings/{booking_id}/return-video`
+Upload the required return video. `multipart/form-data`, field: `file`.
+
+---
+
 ### `GET /api/bookings/{booking_id}/images`
 Get all condition images for a booking.
 
 ---
 
-### `POST /api/bookings/{booking_id}/return`
-Return a drone. Sets booking to `completed`. Creates a damage report if none exists.
+### Lifecycle transition endpoints
+Each endpoint returns the updated booking. Skipped or backwards transitions return `409 Conflict`; retrying the current transition is idempotent.
+
+```text
+POST /api/bookings/{booking_id}/locker-opened
+POST /api/bookings/{booking_id}/case-verified
+POST /api/bookings/{booking_id}/before-photos/complete
+POST /api/bookings/{booking_id}/start-use
+POST /api/bookings/{booking_id}/return/start
+POST /api/bookings/{booking_id}/after-photos/complete
+POST /api/bookings/{booking_id}/return-locker-opened
+POST /api/bookings/{booking_id}/return-video/complete
+POST /api/bookings/{booking_id}/complete-return
+```
+
+Evidence completion endpoints accept a development/demo override:
+
+```json
+{ "skip_evidence_check": true }
+```
+
+Complete return accepts optional admin notes:
 
 ```json
 { "notes": "Minor scuff on left arm noticed." }

@@ -4,7 +4,7 @@ app/main.py
 Drone N' Go API — FastAPI application entrypoint.
 
 On startup:
-  1. Creates all database tables via SQLAlchemy create_all
+  1. Assumes Alembic migrations have already run
   2. Seeds the admin account if it does not exist
 """
 
@@ -18,8 +18,7 @@ from sqlalchemy import select
 from app.api.routers import admin, auth, bookings, drones, locations, users, webhooks
 from app.core.config import get_settings
 from app.core.security import hash_password
-from app.db.base import Base
-from app.db.session import AsyncSessionLocal, engine
+from app.db.session import AsyncSessionLocal
 from app.models.user import User
 
 # Import all models so SQLAlchemy registers them with Base.metadata
@@ -27,9 +26,11 @@ from app.models import (  # noqa: F401
     booking,
     damage_report,
     drone,
+    drone_favorite,
     locker_location,
     locker_unit,
     login_attempt,
+    refresh_token,
     smiota_event,
 )
 
@@ -39,17 +40,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 settings = get_settings()
-
-
-async def _create_tables() -> None:
-    """Create all database tables if they don't already exist."""
-    try:
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-        logger.info("✅  Database tables created/verified.")
-    except Exception as e:
-        logger.error("❌  Database table creation failed: %s", e)
-        raise
 
 
 async def _seed_admin() -> None:
@@ -81,7 +71,6 @@ async def _seed_admin() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("🚀  Drone N' Go API starting up...")
-    await _create_tables()
     await _seed_admin()
     yield
     logger.info("🛑  Drone N' Go API shutting down.")

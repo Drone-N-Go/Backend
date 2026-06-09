@@ -55,36 +55,17 @@ Configure your `SMIOTA_API_KEY` in `.env`. Provide this key to Smiota when setti
 Triggered when staff deposits a drone into the locker.
 
 - Stores `passcode`, `lockerName`, and `courierCode` on the booking
+- Moves booking `reserved` → `ready_for_pickup`
 - User can now call `GET /api/bookings/{id}/passcode` to retrieve their code
-- Console output (developer visibility):
-
-```
-============================================================
-  ***CHECKOUT TOKEN*** : 849201
-  Booking ID          : abc-123-def-456
-  Locker Name         : Locker-A3
-  Courier Code        : COUR-XYZ
-  Object ID           : smiota-obj-abc123
-============================================================
-```
 
 ---
 
 ### `PackagePickedUp`
 Triggered when the user opens the locker and picks up the drone.
 
-- Sets booking status → `active`
-- Sets drone status → `rented`
-- Console output:
-
-```
-============================================================
-  ***RETURNING TOKEN*** : 849201
-  Booking ID           : abc-123-def-456
-  Locker Name          : Locker-A3
-  Object ID            : smiota-obj-abc123
-============================================================
-```
+- Records the raw Smiota event
+- Keeps the drone status → `rented`
+- Does not advance the booking past `ready_for_pickup`; the iOS flow must still confirm locker opened, QR verification, before photos, and start-use
 
 ---
 

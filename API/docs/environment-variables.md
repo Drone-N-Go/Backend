@@ -7,12 +7,10 @@ Full description of every environment variable used by the Drone N' Go API.
 ## DATABASE_URL
 
 ```
-DATABASE_URL="postgresql+asyncpg://USER:PASSWORD@HOST.railway.app:PORT/railway"
+DATABASE_URL="postgresql+asyncpg://USER:PASSWORD@HOST.supabase.co:5432/postgres"
 ```
 
-Your Railway PostgreSQL connection string. **Important:** the prefix must be `postgresql+asyncpg://` (not `postgresql://`) because the API uses async SQLAlchemy.
-
-To find this in Railway: open your PostgreSQL service → **Connect** tab → copy the URL → replace the prefix.
+Your Supabase PostgreSQL connection string. The app normalizes `postgresql://` to `postgresql+asyncpg://` automatically.
 
 ---
 
@@ -112,4 +110,4 @@ Controls SQL query logging (enabled in development, disabled in production) and 
 PORT=8000
 ```
 
-The port the Uvicorn server listens on. Railway sets this automatically via its own `PORT` variable.
+The port the Uvicorn server listens on. Render sets this automatically via its own `PORT` variable.

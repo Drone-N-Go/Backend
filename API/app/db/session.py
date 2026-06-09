@@ -13,8 +13,8 @@ settings = get_settings()
 
 # ---------------------------------------------------------------------------
 # Normalize DATABASE_URL
-# Railway's Raw Editor can inject "DATABASE_URL=postgresql://..." as the
-# value itself — strip the prefix and fix the driver name if needed.
+# Some hosts can inject "DATABASE_URL=postgresql://..." as the value itself.
+# Strip the prefix and fix the async driver name if needed.
 # ---------------------------------------------------------------------------
 _db_url = settings.database_url
 

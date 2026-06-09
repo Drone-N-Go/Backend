@@ -18,14 +18,17 @@ from app.db.session import get_db
 from app.models.user import User
 from app.schemas.user import (
     AdminCreateRequest,
+    RefreshTokenRequest,
     TokenResponse,
     UserLoginRequest,
     UserRegisterRequest,
     UserResponse,
 )
 from app.services import auth_service
+from app.core.config import get_settings
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
+settings = get_settings()
 
 
 def _set_auth_cookies(response: Response, token_data: TokenResponse) -> None:
@@ -35,6 +38,7 @@ def _set_auth_cookies(response: Response, token_data: TokenResponse) -> None:
         value=token_data.access_token,
         httponly=True,
         samesite="lax",
+        secure=settings.is_production,
         max_age=30 * 60,          # 30 minutes
     )
     response.set_cookie(
@@ -42,6 +46,7 @@ def _set_auth_cookies(response: Response, token_data: TokenResponse) -> None:
         value=token_data.refresh_token,
         httponly=True,
         samesite="lax",
+        secure=settings.is_production,
         max_age=7 * 24 * 60 * 60,  # 7 days
     )
 
@@ -82,7 +87,14 @@ async def login(
     "/logout",
     summary="Clear authentication cookies",
 )
-async def logout(response: Response):
+async def logout(
+    response: Response,
+    body: RefreshTokenRequest | None = None,
+    refresh_token: str | None = Cookie(default=None),
+    db: AsyncSession = Depends(get_db),
+):
+    token = body.refresh_token if body else refresh_token
+    await auth_service.revoke_refresh_token(token, db)
     response.delete_cookie("access_token")
     response.delete_cookie("refresh_token")
     return {"message": "Logged out successfully."}
@@ -104,17 +116,19 @@ async def me(current_user: User = Depends(get_current_user)):
 )
 async def refresh(
     response: Response,
+    body: RefreshTokenRequest | None = None,
     refresh_token: str | None = Cookie(default=None),
     db: AsyncSession = Depends(get_db),
 ):
     from fastapi import HTTPException, status
 
-    if not refresh_token:
+    token = body.refresh_token if body else refresh_token
+    if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Refresh token not provided.",
         )
-    token_data = await auth_service.refresh_access_token(refresh_token, db)
+    token_data = await auth_service.refresh_access_token(token, db)
     _set_auth_cookies(response, token_data)
     return token_data
 

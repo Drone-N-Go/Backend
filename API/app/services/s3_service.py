@@ -19,9 +19,10 @@ from app.core.config import get_settings
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
-# Allowed image MIME types
 ALLOWED_CONTENT_TYPES = {"image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"}
+ALLOWED_VIDEO_CONTENT_TYPES = {"video/mp4", "video/quicktime", "video/x-m4v"}
 MAX_FILE_SIZE_MB = 20
+MAX_VIDEO_FILE_SIZE_MB = 250
 
 
 def _get_s3_client():
@@ -100,3 +101,42 @@ async def upload_images(files: list[UploadFile], folder: str) -> list[str]:
             )
 
     return uploaded_urls
+
+
+async def upload_video(file: UploadFile, folder: str) -> str:
+    """
+    Upload a single return video to S3.
+    """
+    if file.content_type not in ALLOWED_VIDEO_CONTENT_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail="Unsupported video type. Allowed: MP4, MOV, M4V.",
+        )
+
+    contents = await file.read()
+    size_mb = len(contents) / (1024 * 1024)
+    if size_mb > MAX_VIDEO_FILE_SIZE_MB:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"File '{file.filename}' exceeds the {MAX_VIDEO_FILE_SIZE_MB}MB limit.",
+        )
+
+    extension = Path(file.filename).suffix.lower() if file.filename else ".mp4"
+    s3_key = f"{folder}/{uuid.uuid4()}{extension}"
+
+    try:
+        _get_s3_client().put_object(
+            Bucket=settings.aws_s3_bucket,
+            Key=s3_key,
+            Body=contents,
+            ContentType=file.content_type,
+        )
+    except (BotoCoreError, ClientError) as e:
+        logger.error("S3 video upload failed for key %s: %s", s3_key, str(e))
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Failed to upload video to storage. Please try again.",
+        )
+
+    logger.info("Uploaded return video to S3: %s", s3_key)
+    return _build_public_url(s3_key)

@@ -13,7 +13,7 @@ Drone management endpoints:
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.dependencies import require_admin
+from app.core.dependencies import get_current_user, get_optional_user, require_admin
 from app.db.session import get_db
 from app.models.user import User
 from app.schemas.drone import (
@@ -41,9 +41,15 @@ async def list_drones(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
+    current_user: User | None = Depends(get_optional_user),
 ):
     return await drone_service.list_drones(
-        db, status_filter=status, location_id=location_id, skip=skip, limit=limit
+        db,
+        current_user=current_user,
+        status_filter=status,
+        location_id=location_id,
+        skip=skip,
+        limit=limit,
     )
 
 
@@ -52,9 +58,12 @@ async def list_drones(
     response_model=DroneResponse,
     summary="Get a single drone by ID",
 )
-async def get_drone(drone_id: str, db: AsyncSession = Depends(get_db)):
-    drone = await drone_service.get_drone(drone_id, db)
-    return DroneResponse.model_validate(drone)
+async def get_drone(
+    drone_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User | None = Depends(get_optional_user),
+):
+    return await drone_service.get_drone_response(drone_id, db, current_user)
 
 
 @router.post(
@@ -69,7 +78,7 @@ async def create_drone(
     _admin: User = Depends(require_admin),
 ):
     drone = await drone_service.create_drone(body, db)
-    return DroneResponse.model_validate(drone)
+    return await drone_service.get_drone_response(drone.id, db)
 
 
 @router.put(
@@ -84,7 +93,7 @@ async def update_drone(
     _admin: User = Depends(require_admin),
 ):
     drone = await drone_service.update_drone(drone_id, body, db)
-    return DroneResponse.model_validate(drone)
+    return await drone_service.get_drone_response(drone.id, db)
 
 
 @router.delete(
@@ -112,4 +121,30 @@ async def update_drone_status(
     _admin: User = Depends(require_admin),
 ):
     drone = await drone_service.update_drone_status(drone_id, body.status, db)
-    return DroneResponse.model_validate(drone)
+    return await drone_service.get_drone_response(drone.id, db)
+
+
+@router.post(
+    "/{drone_id}/favorite",
+    response_model=DroneResponse,
+    summary="Favorite a drone",
+)
+async def favorite_drone(
+    drone_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await drone_service.favorite_drone(drone_id, current_user, db)
+
+
+@router.delete(
+    "/{drone_id}/favorite",
+    response_model=DroneResponse,
+    summary="Remove a drone from favorites",
+)
+async def unfavorite_drone(
+    drone_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await drone_service.unfavorite_drone(drone_id, current_user, db)

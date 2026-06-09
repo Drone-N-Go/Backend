@@ -13,8 +13,17 @@ Booking lifecycle endpoints:
 Damage / return endpoints:
   POST  /api/bookings/{id}/images/pre-rental
   POST  /api/bookings/{id}/images/post-rental
+  POST  /api/bookings/{id}/return-video
   GET   /api/bookings/{id}/images
-  POST  /api/bookings/{id}/return
+  POST  /api/bookings/{id}/locker-opened
+  POST  /api/bookings/{id}/case-verified
+  POST  /api/bookings/{id}/before-photos/complete
+  POST  /api/bookings/{id}/start-use
+  POST  /api/bookings/{id}/return/start
+  POST  /api/bookings/{id}/after-photos/complete
+  POST  /api/bookings/{id}/return-locker-opened
+  POST  /api/bookings/{id}/return-video/complete
+  POST  /api/bookings/{id}/complete-return
 
 Admin condition review:
   PATCH /api/admin/drones/{id}/condition   (defined in admin.py — imported here for proximity)
@@ -30,14 +39,16 @@ from app.db.session import get_db
 from app.models.user import User
 from app.schemas.booking import (
     BookingCreateRequest,
+    BookingReturnRequest,
+    EvidenceCompletionRequest,
     BookingListResponse,
     BookingResponse,
-    BookingReturnRequest,
     BookingSmiotaLinkRequest,
     BookingStatusRequest,
     PasscodeResponse,
 )
-from app.schemas.damage import BookingImagesResponse, ImageUploadResponse
+from app.core.booking_lifecycle import BOOKING_STATUS_PATTERN
+from app.schemas.damage import BookingImagesResponse, ImageUploadResponse, ReturnVideoUploadResponse
 from app.services import booking_service, damage_service
 
 router = APIRouter(prefix="/bookings", tags=["Bookings"])
@@ -59,7 +70,7 @@ async def create_booking(
     current_user: User = Depends(get_current_user),
 ):
     booking = await booking_service.create_booking(body, current_user, db)
-    return BookingResponse.model_validate(booking)
+    return await booking_service.get_booking_detail(booking.id, current_user, db)
 
 
 @router.get(
@@ -69,7 +80,7 @@ async def create_booking(
 )
 async def list_bookings(
     status: str | None = Query(
-        None, pattern="^(pending|active|completed|cancelled)$"
+        None, pattern=BOOKING_STATUS_PATTERN
     ),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
@@ -82,6 +93,32 @@ async def list_bookings(
 
 
 @router.get(
+    "/active",
+    response_model=BookingResponse | None,
+    summary="Get the current user's active booking",
+)
+async def get_active_booking(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await booking_service.get_active_booking(current_user, db)
+
+
+@router.get(
+    "/history",
+    response_model=BookingListResponse,
+    summary="Get the current user's returned and cancelled bookings",
+)
+async def get_booking_history(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await booking_service.list_booking_history(current_user, db, skip=skip, limit=limit)
+
+
+@router.get(
     "/{booking_id}",
     response_model=BookingResponse,
     summary="Get a single booking by ID",
@@ -91,8 +128,7 @@ async def get_booking(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    booking = await booking_service.get_booking(booking_id, current_user, db)
-    return BookingResponse.model_validate(booking)
+    return await booking_service.get_booking_detail(booking_id, current_user, db)
 
 
 @router.get(
@@ -119,7 +155,7 @@ async def cancel_booking(
     current_user: User = Depends(get_current_user),
 ):
     booking = await booking_service.cancel_booking(booking_id, current_user, db)
-    return BookingResponse.model_validate(booking)
+    return await booking_service.get_booking_detail(booking.id, current_user, db)
 
 
 @router.patch(
@@ -184,6 +220,20 @@ async def upload_post_rental_images(
     return await damage_service.upload_post_rental_images(booking_id, files, current_user, db)
 
 
+@router.post(
+    "/{booking_id}/return-video",
+    response_model=ReturnVideoUploadResponse,
+    summary="Upload required return video",
+)
+async def upload_return_video(
+    booking_id: str,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await damage_service.upload_return_video(booking_id, file, current_user, db)
+
+
 @router.get(
     "/{booking_id}/images",
     response_model=BookingImagesResponse,
@@ -197,16 +247,141 @@ async def get_booking_images(
     return await damage_service.get_booking_images(booking_id, current_user, db)
 
 
+# --------------------------------------------------------------------------- #
+# Frontend-aligned lifecycle endpoints
+# --------------------------------------------------------------------------- #
+
 @router.post(
-    "/{booking_id}/return",
+    "/{booking_id}/locker-opened",
     response_model=BookingResponse,
-    summary="Return a drone and complete the booking",
+    summary="Mark pickup locker opened",
 )
-async def return_drone(
+async def mark_locker_opened(
+    booking_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    booking = await booking_service.mark_locker_opened(booking_id, current_user, db)
+    return await booking_service.get_booking_detail(booking.id, current_user, db)
+
+
+@router.post(
+    "/{booking_id}/case-verified",
+    response_model=BookingResponse,
+    summary="Mark pickup case QR verified",
+)
+async def mark_case_verified(
+    booking_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    booking = await booking_service.mark_case_verified(booking_id, current_user, db)
+    return await booking_service.get_booking_detail(booking.id, current_user, db)
+
+
+@router.post(
+    "/{booking_id}/before-photos/complete",
+    response_model=BookingResponse,
+    summary="Complete before-rental photo documentation",
+)
+async def complete_before_photos(
+    booking_id: str,
+    body: EvidenceCompletionRequest = EvidenceCompletionRequest(),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    booking = await booking_service.complete_before_photos(
+        booking_id, body.skip_evidence_check, current_user, db
+    )
+    return await booking_service.get_booking_detail(booking.id, current_user, db)
+
+
+@router.post(
+    "/{booking_id}/start-use",
+    response_model=BookingResponse,
+    summary="Move booking into active in-use state",
+)
+async def start_use(
+    booking_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    booking = await booking_service.start_use(booking_id, current_user, db)
+    return await booking_service.get_booking_detail(booking.id, current_user, db)
+
+
+@router.post(
+    "/{booking_id}/return/start",
+    response_model=BookingResponse,
+    summary="Start return flow",
+)
+async def start_return(
+    booking_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    booking = await booking_service.start_return(booking_id, current_user, db)
+    return await booking_service.get_booking_detail(booking.id, current_user, db)
+
+
+@router.post(
+    "/{booking_id}/after-photos/complete",
+    response_model=BookingResponse,
+    summary="Complete after-rental photo documentation",
+)
+async def complete_after_photos(
+    booking_id: str,
+    body: EvidenceCompletionRequest = EvidenceCompletionRequest(),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    booking = await booking_service.complete_after_photos(
+        booking_id, body.skip_evidence_check, current_user, db
+    )
+    return await booking_service.get_booking_detail(booking.id, current_user, db)
+
+
+@router.post(
+    "/{booking_id}/return-locker-opened",
+    response_model=BookingResponse,
+    summary="Mark return locker opened",
+)
+async def mark_return_locker_opened(
+    booking_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    booking = await booking_service.mark_return_locker_opened(booking_id, current_user, db)
+    return await booking_service.get_booking_detail(booking.id, current_user, db)
+
+
+@router.post(
+    "/{booking_id}/return-video/complete",
+    response_model=BookingResponse,
+    summary="Complete return video documentation",
+)
+async def complete_return_video(
+    booking_id: str,
+    body: EvidenceCompletionRequest = EvidenceCompletionRequest(),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    booking = await booking_service.complete_return_video(
+        booking_id, body.skip_evidence_check, current_user, db
+    )
+    return await booking_service.get_booking_detail(booking.id, current_user, db)
+
+
+@router.post(
+    "/{booking_id}/complete-return",
+    response_model=BookingResponse,
+    summary="Complete the booking return",
+)
+async def complete_return(
     booking_id: str,
     body: BookingReturnRequest = BookingReturnRequest(),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    booking = await booking_service.return_drone(booking_id, body.notes, current_user, db)
-    return BookingResponse.model_validate(booking)
+    booking = await booking_service.complete_return(booking_id, body.notes, current_user, db)
+    return await booking_service.get_booking_detail(booking.id, current_user, db)

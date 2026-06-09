@@ -30,6 +30,8 @@ class DamageReportResponse(BaseModel):
     drone_id: str
     pre_rental_images: list[str]
     post_rental_images: list[str]
+    return_video_url: Optional[str]
+    return_video_uploaded_at: Optional[datetime]
     admin_notes: Optional[str]
     condition_status: str
     created_at: datetime
@@ -45,7 +47,14 @@ class ImageUploadResponse(BaseModel):
     damage_report: DamageReportResponse
 
 
+class ReturnVideoUploadResponse(BaseModel):
+    booking_id: str
+    return_video_url: str
+    damage_report: DamageReportResponse
+
+
 class BookingImagesResponse(BaseModel):
     booking_id: str
     pre_rental_images: list[str]
     post_rental_images: list[str]
+    return_video_url: Optional[str]

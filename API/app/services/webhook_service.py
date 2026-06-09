@@ -2,16 +2,13 @@
 app/services/webhook_service.py
 --------------------------------
 Business logic for processing Smiota locker webhook events.
-
-Console output conventions (visible during development/testing):
-  ***CHECKOUT TOKEN*** : <passcode>   — when a drone is deposited (PackageDeposited)
-  ***RETURNING TOKEN*** : <passcode>  — when a drone is picked up for return (PackagePickedUp)
 """
 
 import logging
+from datetime import datetime, timezone
 
 from fastapi import HTTPException, Request, status
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -70,8 +67,8 @@ async def process_smiota_webhook(
     Process an incoming Smiota webhook event.
 
     Supported notification_type values:
-      - PackageDeposited : Drone placed in locker → store passcode on booking
-      - PackagePickedUp  : User picked up drone → mark booking active
+      - PackageDeposited : Drone placed in locker → store passcode and mark ready for pickup
+      - PackagePickedUp  : User picked up drone → audit only; iOS drives verification states
     """
 
     # 1. Log raw event to smiota_events table
@@ -110,50 +107,28 @@ async def process_smiota_webhook(
         booking.smiota_passcode = body.passcode
         booking.smiota_locker_name = body.lockerName
         booking.smiota_courier_code = body.courierCode
+        if booking.status == "reserved":
+            booking.status = "ready_for_pickup"
+            booking.ready_for_pickup_at = datetime.now(timezone.utc)
         db.add(booking)
 
-        # ------------------------------------------------------------------ #
-        # DEVELOPER CONSOLE OUTPUT — Checkout token visibility
-        # ------------------------------------------------------------------ #
-        print(f"\n{'='*60}")
-        print(f"  ***CHECKOUT TOKEN*** : {body.passcode}")
-        print(f"  Booking ID          : {booking.id}")
-        print(f"  Locker Name         : {body.lockerName}")
-        print(f"  Courier Code        : {body.courierCode}")
-        print(f"  Object ID           : {body.objectId}")
-        print(f"{'='*60}\n")
-
         logger.info(
-            "PackageDeposited — booking %s | passcode: %s | locker: %s",
+            "PackageDeposited — booking %s ready for pickup | locker: %s",
             booking.id,
-            body.passcode,
             body.lockerName,
         )
 
     elif body.notification_type == "PackagePickedUp":
-        # User picked up the drone → activate the booking
-        booking.status = "active"
-        db.add(booking)
-
-        # Also ensure drone is marked rented
+        # Audit only. The app must still confirm locker opened, QR verification,
+        # before photos, and explicit start-use before reaching in_use.
         drone_result = await db.execute(select(Drone).where(Drone.id == booking.drone_id))
         drone = drone_result.scalar_one_or_none()
         if drone:
             drone.status = "rented"
             db.add(drone)
 
-        # ------------------------------------------------------------------ #
-        # DEVELOPER CONSOLE OUTPUT — Returning token visibility
-        # ------------------------------------------------------------------ #
-        print(f"\n{'='*60}")
-        print(f"  ***RETURNING TOKEN*** : {body.passcode}")
-        print(f"  Booking ID           : {booking.id}")
-        print(f"  Locker Name          : {body.lockerName}")
-        print(f"  Object ID            : {body.objectId}")
-        print(f"{'='*60}\n")
-
         logger.info(
-            "PackagePickedUp — booking %s activated | drone %s → rented",
+            "PackagePickedUp — booking %s audited | drone %s remains rented",
             booking.id,
             booking.drone_id,
         )

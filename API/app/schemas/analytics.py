@@ -25,9 +25,17 @@ class OverviewStats(BaseModel):
 
 
 class BookingStatusBreakdown(BaseModel):
-    pending: int
-    active: int
-    completed: int
+    reserved: int
+    ready_for_pickup: int
+    locker_opened: int
+    case_verified: int
+    before_photos_complete: int
+    in_use: int
+    return_started: int
+    after_photos_complete: int
+    return_locker_opened: int
+    return_video_complete: int
+    returned: int
     cancelled: int
 
 

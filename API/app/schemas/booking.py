@@ -6,9 +6,11 @@ Pydantic v2 request/response schemas for booking-related endpoints.
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field
+
+from app.core.booking_lifecycle import BOOKING_STATUS_PATTERN
 
 
 # ---------------------------------------------------------------------------
@@ -24,7 +26,7 @@ class BookingCreateRequest(BaseModel):
 
 
 class BookingStatusRequest(BaseModel):
-    status: str = Field(..., pattern="^(pending|active|completed|cancelled)$")
+    status: str = Field(..., pattern=BOOKING_STATUS_PATTERN)
 
 
 class BookingSmiotaLinkRequest(BaseModel):
@@ -37,6 +39,13 @@ class BookingReturnRequest(BaseModel):
 
 class BookingCancelRequest(BaseModel):
     pass
+
+
+class EvidenceCompletionRequest(BaseModel):
+    skip_evidence_check: bool = Field(
+        default=False,
+        description="Development/demo override for completing a documentation step without uploaded evidence.",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -57,6 +66,22 @@ class BookingResponse(BaseModel):
     smiota_passcode: Optional[str]
     smiota_locker_name: Optional[str]
     smiota_courier_code: Optional[str]
+    ready_for_pickup_at: Optional[datetime]
+    locker_opened_at: Optional[datetime]
+    case_verified_at: Optional[datetime]
+    before_photos_completed_at: Optional[datetime]
+    in_use_at: Optional[datetime]
+    return_started_at: Optional[datetime]
+    after_photos_completed_at: Optional[datetime]
+    return_locker_opened_at: Optional[datetime]
+    return_video_completed_at: Optional[datetime]
+    returned_at: Optional[datetime]
+    cancelled_at: Optional[datetime]
+    drone: Optional[dict[str, Any]] = None
+    location: Optional[dict[str, Any]] = None
+    pre_rental_images: list[str] = []
+    post_rental_images: list[str] = []
+    return_video_url: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
