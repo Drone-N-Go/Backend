@@ -87,10 +87,10 @@ Instead of `AmazonS3FullAccess`, create a custom policy with only what the API n
 ## Step 6 — Add Keys to .env
 
 ```env
-AWS_ACCESS_KEY_ID="AKIA..."
-AWS_SECRET_ACCESS_KEY="abc123..."
-AWS_REGION="us-east-1"
-AWS_S3_BUCKET="droneandgo-images"
+AWS_ACCESS_KEY_ID=YOUR_AWS_ACCESS_KEY_ID_HERE
+AWS_SECRET_ACCESS_KEY=YOUR_AWS_SECRET_ACCESS_KEY_HERE
+AWS_REGION=us-east-1
+AWS_S3_BUCKET=YOUR_AWS_S3_BUCKET_HERE
 ```
 
 ---

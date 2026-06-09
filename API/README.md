@@ -121,20 +121,14 @@ cp .env.example .env
 
 ## Environment Variables
 
-Copy `.env.example` to `.env` and fill in every value. See [docs/environment-variables.md](docs/environment-variables.md) for a full description of each variable.
+Copy `.env.example` to `.env` for local development and fill in the required values. See [docs/environment-variables.md](docs/environment-variables.md) for a full description of optional integration variables.
 
 | Variable | Description |
 |---|---|
+| `APP_ENV` | `development` locally, `production` on Render |
 | `DATABASE_URL` | Supabase PostgreSQL URL |
-| `JWT_SECRET` | 64-char hex secret for signing JWTs |
-| `ADMIN_EMAIL` | Seed admin account email |
-| `ADMIN_PASSWORD` | Seed admin account password |
-| `SMIOTA_API_KEY` | API key used for Smiota webhook Basic Auth |
-| `AWS_ACCESS_KEY_ID` | AWS IAM access key |
-| `AWS_SECRET_ACCESS_KEY` | AWS IAM secret key |
-| `AWS_REGION` | S3 bucket region (e.g. `us-east-1`) |
-| `AWS_S3_BUCKET` | S3 bucket name |
-| `CORS_ORIGINS` | Comma-separated allowed origins (use `*` for dev) |
+| `SECRET_KEY` | Secret for signing JWTs |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | Access token lifetime in minutes |
 
 ---
 
@@ -151,9 +145,13 @@ make dev
 #   http://localhost:8000/redoc   ← ReDoc
 ```
 
-On first run, the API will:
-1. Apply all Alembic migrations (creates all tables)
-2. Seed the admin account defined in `.env`
+Before first run against a real database, apply Alembic migrations:
+
+```bash
+alembic upgrade head
+```
+
+If `ADMIN_EMAIL` and `ADMIN_PASSWORD` are set, the API seeds that admin account on startup.
 
 ---
 
@@ -274,6 +272,41 @@ make downgrade
 ---
 
 ## Deployment (Render + Supabase)
+
+Use `Backend/API` as the Render service root directory when connecting the whole repository. If deploying from the existing `Backend/render.yaml` blueprint inside the Backend repo, its `rootDir: API` setting is equivalent.
+
+Render build command:
+
+```bash
+pip install -r requirements.txt
+```
+
+Render start command:
+
+```bash
+uvicorn app.main:app --host 0.0.0.0 --port $PORT
+```
+
+Set these environment variables in Render:
+
+```env
+APP_ENV=production
+DATABASE_URL=<Supabase Session Pooler URL>
+SECRET_KEY=<generated secret key>
+ACCESS_TOKEN_EXPIRE_MINUTES=30
+```
+
+Generate `SECRET_KEY` with:
+
+```bash
+python3 -c "import secrets; print(secrets.token_urlsafe(64))"
+```
+
+Run migrations against Supabase before serving live traffic:
+
+```bash
+alembic upgrade head
+```
 
 See [docs/deployment.md](docs/deployment.md) for step-by-step Render + Supabase deployment instructions.
 

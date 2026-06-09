@@ -7,23 +7,23 @@ Full description of every environment variable used by the Drone N' Go API.
 ## DATABASE_URL
 
 ```
-DATABASE_URL="postgresql+asyncpg://USER:PASSWORD@HOST.supabase.co:5432/postgres"
+DATABASE_URL=YOUR_DATABASE_URL_HERE
 ```
 
 Your Supabase PostgreSQL connection string. The app normalizes `postgresql://` to `postgresql+asyncpg://` automatically.
 
 ---
 
-## JWT_SECRET
+## SECRET_KEY
 
 ```
-JWT_SECRET="a7f3b2c8..."
+SECRET_KEY=YOUR_SECRET_KEY_HERE
 ```
 
 A long random secret used to sign and verify JWT tokens. Generate one with:
 
 ```bash
-python -c "import secrets; print(secrets.token_hex(32))"
+python3 -c "import secrets; print(secrets.token_urlsafe(64))"
 ```
 
 Never share this. Rotate it to instantly invalidate all active sessions.
@@ -33,8 +33,8 @@ Never share this. Rotate it to instantly invalidate all active sessions.
 ## ADMIN_EMAIL / ADMIN_PASSWORD
 
 ```
-ADMIN_EMAIL="james@droneandgo.io"
-ADMIN_PASSWORD="YourSecurePassword"
+ADMIN_EMAIL=YOUR_ADMIN_EMAIL_HERE
+ADMIN_PASSWORD=YOUR_ADMIN_PASSWORD_HERE
 ```
 
 Credentials for the seed admin account, created automatically on first startup.
@@ -44,7 +44,7 @@ Credentials for the seed admin account, created automatically on first startup.
 ## SMIOTA_API_KEY
 
 ```
-SMIOTA_API_KEY="sk_smiota_dronengo_..."
+SMIOTA_API_KEY=YOUR_SMIOTA_API_KEY_HERE
 ```
 
 The API key used to authenticate incoming Smiota webhook requests. Smiota sends this as the HTTP Basic Auth username. You can generate any string — just make sure Smiota is configured to use the same value.
@@ -66,8 +66,8 @@ Comma-separated list of allowed CORS origins. Use `*` for development. In produc
 ## AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY
 
 ```
-AWS_ACCESS_KEY_ID="AKIA..."
-AWS_SECRET_ACCESS_KEY="abc123..."
+AWS_ACCESS_KEY_ID=YOUR_AWS_ACCESS_KEY_ID_HERE
+AWS_SECRET_ACCESS_KEY=YOUR_AWS_SECRET_ACCESS_KEY_HERE
 ```
 
 IAM credentials for uploading drone images to S3. See [aws-s3-setup.md](aws-s3-setup.md) for how to create these.

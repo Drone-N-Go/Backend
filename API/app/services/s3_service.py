@@ -26,17 +26,29 @@ MAX_VIDEO_FILE_SIZE_MB = 250
 
 
 def _get_s3_client():
+    access_key_id, secret_access_key, _bucket = _require_s3_settings()
     return boto3.client(
         "s3",
         region_name=settings.aws_region,
-        aws_access_key_id=settings.aws_access_key_id,
-        aws_secret_access_key=settings.aws_secret_access_key,
+        aws_access_key_id=access_key_id,
+        aws_secret_access_key=secret_access_key,
     )
+
+
+def _require_s3_settings() -> tuple[str, str, str]:
+    try:
+        return settings.require_s3_settings()
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        )
 
 
 def _build_public_url(key: str) -> str:
     """Construct the public S3 URL for a given object key."""
-    return f"https://{settings.aws_s3_bucket}.s3.{settings.aws_region}.amazonaws.com/{key}"
+    _access_key_id, _secret_access_key, bucket = _require_s3_settings()
+    return f"https://{bucket}.s3.{settings.aws_region}.amazonaws.com/{key}"
 
 
 async def upload_images(files: list[UploadFile], folder: str) -> list[str]:
@@ -85,7 +97,7 @@ async def upload_images(files: list[UploadFile], folder: str) -> list[str]:
 
         try:
             s3.put_object(
-                Bucket=settings.aws_s3_bucket,
+                Bucket=_require_s3_settings()[2],
                 Key=s3_key,
                 Body=contents,
                 ContentType=file.content_type,
@@ -126,7 +138,7 @@ async def upload_video(file: UploadFile, folder: str) -> str:
 
     try:
         _get_s3_client().put_object(
-            Bucket=settings.aws_s3_bucket,
+            Bucket=_require_s3_settings()[2],
             Key=s3_key,
             Body=contents,
             ContentType=file.content_type,

@@ -49,7 +49,15 @@ def verify_smiota_auth(request: Request) -> None:
             detail="Malformed Basic Auth credentials.",
         )
 
-    if api_key != settings.smiota_api_key:
+    try:
+        expected_api_key = settings.require_smiota_api_key()
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        )
+
+    if api_key != expected_api_key:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid API key.",

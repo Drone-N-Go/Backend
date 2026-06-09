@@ -1,6 +1,9 @@
 # Environment & secrets
 .env
-*.env.local
+.env.local
+.env.production
+*.pem
+*.key
 
 # Python
 __pycache__/

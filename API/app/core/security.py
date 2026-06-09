@@ -40,7 +40,7 @@ def _create_token(payload: dict, expires_delta: timedelta) -> str:
     """Internal helper — sign a JWT with expiry."""
     expire = datetime.now(timezone.utc) + expires_delta
     to_encode = {**payload, "exp": expire}
-    return jwt.encode(to_encode, settings.jwt_secret, algorithm=settings.jwt_algorithm)
+    return jwt.encode(to_encode, settings.secret_key, algorithm=settings.jwt_algorithm)
 
 
 def create_access_token(user_id: str, email: str) -> str:
@@ -67,7 +67,7 @@ def decode_token(token: str) -> Optional[dict]:
     try:
         return jwt.decode(
             token,
-            settings.jwt_secret,
+            settings.secret_key,
             algorithms=[settings.jwt_algorithm],
         )
     except jwt.ExpiredSignatureError:

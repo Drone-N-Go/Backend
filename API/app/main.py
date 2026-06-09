@@ -44,6 +44,10 @@ settings = get_settings()
 
 async def _seed_admin() -> None:
     """Create the initial admin account if it does not yet exist."""
+    if not settings.admin_email or not settings.admin_password:
+        logger.info("Admin seed skipped; ADMIN_EMAIL and ADMIN_PASSWORD are not both set.")
+        return
+
     try:
         async with AsyncSessionLocal() as db:
             result = await db.execute(
@@ -126,4 +130,4 @@ async def root():
 
 @app.get("/health", tags=["Health"], summary="Detailed health check")
 async def health():
-    return {"status": "healthy", "environment": settings.app_env}
+    return {"status": "ok", "service": "dronengo-backend"}

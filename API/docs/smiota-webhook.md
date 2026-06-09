@@ -108,7 +108,7 @@ You can also test manually with curl:
 
 ```bash
 curl -X POST http://localhost:8000/api/webhooks/smiota \
-  -u "sk_smiota_dronengo_x9k2m4p7q1w3e5r8t0y6:" \
+  -u "YOUR_SMIOTA_API_KEY_HERE:" \
   -H "Content-Type: application/json" \
   -d '{
     "notification_type": "PackageDeposited",
