@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 logger = logging.getLogger(__name__)
 
-EXPECTED_ADMIN_REVISION = "20260612_0004"
+EXPECTED_ADMIN_REVISION = "20260612_0005"
 EXPECTED_ADMIN_ROLE_CONSTRAINT_VALUES = {
     "owner",
     "master_developer",
@@ -25,6 +25,7 @@ REQUIRED_ADMIN_TABLES = {
     "admin_profiles",
     "admin_location_assignments",
     "admin_audit_events",
+    "case_qr_tokens",
     "maintenance_tasks",
     "locker_access_events",
 }
@@ -35,6 +36,22 @@ REQUIRED_ADMIN_COLUMNS = {
         "smiota_locker_name",
         "smiota_unit_identifier",
         "smiota_metadata",
+    },
+    "case_qr_tokens": {
+        "id",
+        "drone_id",
+        "token_hash",
+        "encrypted_token",
+        "payload_prefix",
+        "status",
+        "created_by_admin_profile_id",
+        "confirmed_by_admin_profile_id",
+        "confirmed_at",
+        "voided_at",
+        "void_reason",
+        "rotated_at",
+        "created_at",
+        "updated_at",
     },
 }
 
