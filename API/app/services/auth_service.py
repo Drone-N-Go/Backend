@@ -43,6 +43,7 @@ def _hash_token(token: str) -> str:
 
 
 async def build_token_response(user: User, db: AsyncSession) -> TokenResponse:
+    print(f"AUTH_TRACE build_token_response start user_id={user.id} email={user.email}")
     access_token = create_access_token(user.id, user.email)
     refresh_token = create_refresh_token(user.id)
     expires_at = datetime.now(timezone.utc) + timedelta(days=settings.refresh_token_expire_days)
@@ -54,6 +55,7 @@ async def build_token_response(user: User, db: AsyncSession) -> TokenResponse:
         )
     )
     await db.flush()
+    print(f"AUTH_TRACE build_token_response refresh_token_flushed user_id={user.id}")
     return TokenResponse(
         access_token=access_token,
         refresh_token=refresh_token,
@@ -111,8 +113,13 @@ async def login_user(
     """
     client_ip = request.client.host if request.client else "unknown"
     identifier = f"{client_ip}:{email.lower()}"
+    print(f"AUTH_TRACE login_user start email={email.lower()} client_ip={client_ip}")
 
     attempt = await _get_or_create_attempt(db, identifier)
+    print(
+        "AUTH_TRACE login_user attempt_loaded "
+        f"email={email.lower()} count={attempt.count} locked={attempt.lockout_until is not None}"
+    )
 
     # Check lockout
     if attempt.lockout_until and attempt.lockout_until > datetime.now(timezone.utc):
@@ -125,10 +132,12 @@ async def login_user(
     # Fetch user
     result = await db.execute(select(User).where(User.email == email.lower()))
     user = result.scalar_one_or_none()
+    print(f"AUTH_TRACE login_user user_lookup email={email.lower()} found={user is not None}")
 
     if not user or not verify_password(password, user.password_hash):
         attempt.count += 1
         attempt.updated_at = datetime.now(timezone.utc)
+        print(f"AUTH_TRACE login_user invalid_credentials email={email.lower()} count={attempt.count}")
 
         if attempt.count >= settings.max_login_attempts:
             attempt.lockout_until = datetime.now(timezone.utc) + timedelta(
@@ -153,6 +162,7 @@ async def login_user(
     await db.flush()
 
     logger.info("User logged in: %s", user.email)
+    print(f"AUTH_TRACE login_user success user_id={user.id} email={user.email}")
     return await build_token_response(user, db)
 
 

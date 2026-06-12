@@ -9,6 +9,8 @@ Authentication endpoints:
   POST /api/auth/refresh
 """
 
+import logging
+
 from fastapi import APIRouter, Cookie, Depends, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,6 +29,7 @@ from app.core.config import get_settings
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 settings = get_settings()
+logger = logging.getLogger(__name__)
 
 
 def _set_auth_cookies(response: Response, token_data: TokenResponse) -> None:
@@ -76,9 +79,15 @@ async def login(
     response: Response,
     db: AsyncSession = Depends(get_db),
 ):
-    token_data = await auth_service.login_user(body.email, body.password, request, db)
-    _set_auth_cookies(response, token_data)
-    return token_data
+    logger.info("AUTH_TRACE login route start email=%s", body.email)
+    try:
+        token_data = await auth_service.login_user(body.email, body.password, request, db)
+        _set_auth_cookies(response, token_data)
+        logger.info("AUTH_TRACE login route success user_id=%s", token_data.user.id)
+        return token_data
+    except Exception:
+        logger.exception("AUTH_TRACE login route failed email=%s", body.email)
+        raise
 
 
 @router.post(

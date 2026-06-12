@@ -139,15 +139,22 @@ async def _get_admin_profile(profile_id: str, db: AsyncSession) -> AdminProfile:
 
 
 async def get_me(context: AdminContext) -> AdminProfileResponse:
+    print(
+        "ADMIN_TRACE get_me service "
+        f"user_id={context.user.id} profile_id={context.profile.id} "
+        f"role={context.profile.role} assigned_locations={len(context.assigned_location_ids)}"
+    )
     return _profile_response(context.profile, sorted(context.assigned_location_ids))
 
 
 async def setup_first_owner(body: OwnerSetupRequest, db: AsyncSession) -> OwnerSetupResponse:
+    print(f"ADMIN_TRACE setup_first_owner start email={body.email}")
     active_count = (
         await db.execute(
             select(func.count()).select_from(AdminProfile).where(AdminProfile.status == "active")
         )
     ).scalar_one()
+    print(f"ADMIN_TRACE setup_first_owner active_admin_count={active_count}")
     if active_count:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -156,11 +163,13 @@ async def setup_first_owner(body: OwnerSetupRequest, db: AsyncSession) -> OwnerS
 
     existing_user = await db.execute(select(User).where(User.email == body.email.lower()))
     if existing_user.scalar_one_or_none():
+        print(f"ADMIN_TRACE setup_first_owner existing_user_conflict email={body.email}")
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="An account with this email already exists.",
         )
 
+    print(f"ADMIN_TRACE setup_first_owner creating_user email={body.email}")
     user = User(
         email=body.email.lower(),
         password_hash=hash_password(body.password),
@@ -170,6 +179,7 @@ async def setup_first_owner(body: OwnerSetupRequest, db: AsyncSession) -> OwnerS
     )
     db.add(user)
     await db.flush()
+    print(f"ADMIN_TRACE setup_first_owner user_flushed user_id={user.id}")
 
     profile = AdminProfile(
         user_id=user.id,
@@ -180,8 +190,10 @@ async def setup_first_owner(body: OwnerSetupRequest, db: AsyncSession) -> OwnerS
     )
     db.add(profile)
     await db.flush()
+    print(f"ADMIN_TRACE setup_first_owner profile_flushed profile_id={profile.id}")
 
     token_data = await auth_service.build_token_response(user, db)
+    print(f"ADMIN_TRACE setup_first_owner token_created user_id={user.id}")
     await _audit(
         db,
         None,
@@ -190,8 +202,10 @@ async def setup_first_owner(body: OwnerSetupRequest, db: AsyncSession) -> OwnerS
         profile.id,
         {"email": user.email},
     )
+    print(f"ADMIN_TRACE setup_first_owner audit_written profile_id={profile.id}")
 
     profile.user = user
+    print(f"ADMIN_TRACE setup_first_owner response_ready profile_id={profile.id}")
     return OwnerSetupResponse(
         access_token=token_data.access_token,
         refresh_token=token_data.refresh_token,

@@ -4,6 +4,8 @@ app/api/routers/admin.py
 Admin backend endpoints for Admin-iOS and future Admin-Android.
 """
 
+import logging
+
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -43,6 +45,7 @@ from app.schemas.admin import (
 from app.services import admin_service
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
+logger = logging.getLogger(__name__)
 
 
 @router.post(
@@ -55,7 +58,14 @@ async def setup_owner(
     body: OwnerSetupRequest,
     db: AsyncSession = Depends(get_db),
 ):
-    return await admin_service.setup_first_owner(body, db)
+    logger.info("ADMIN_TRACE setup_owner route start email=%s", body.email)
+    try:
+        response = await admin_service.setup_first_owner(body, db)
+        logger.info("ADMIN_TRACE setup_owner route success user_id=%s", response.user.id)
+        return response
+    except Exception:
+        logger.exception("ADMIN_TRACE setup_owner route failed email=%s", body.email)
+        raise
 
 
 @router.get(
@@ -64,7 +74,18 @@ async def setup_owner(
     summary="Get the current admin profile and capabilities",
 )
 async def me(context: AdminContext = Depends(require_admin_profile)):
-    return AdminMeResponse(profile=await admin_service.get_me(context))
+    logger.info(
+        "ADMIN_TRACE admin_me route start user_id=%s profile_id=%s",
+        context.user.id,
+        context.profile.id,
+    )
+    try:
+        profile = await admin_service.get_me(context)
+        logger.info("ADMIN_TRACE admin_me route success profile_id=%s", profile.id)
+        return AdminMeResponse(profile=profile)
+    except Exception:
+        logger.exception("ADMIN_TRACE admin_me route failed profile_id=%s", context.profile.id)
+        raise
 
 
 @router.get(
