@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routers import admin, auth, bookings, drones, locations, users, webhooks
 from app.core.config import get_settings
+from app.db.startup import ensure_database_ready
 
 # Import all models so SQLAlchemy registers them with Base.metadata
 from app.models import (  # noqa: F401
@@ -76,6 +77,17 @@ app.include_router(locations.router, prefix=API_PREFIX)
 app.include_router(bookings.router,  prefix=API_PREFIX)
 app.include_router(webhooks.router,  prefix=API_PREFIX)
 app.include_router(admin.router,     prefix=API_PREFIX)
+
+
+@app.on_event("startup")
+async def run_database_startup_checks():
+    if settings.app_env == "test":
+        logger.info("DB_STARTUP skipped for test environment")
+        return
+
+    logger.info("DB_STARTUP starting migration and admin schema verification")
+    await ensure_database_ready()
+    logger.info("DB_STARTUP completed")
 
 
 @app.get("/", tags=["Health"], summary="Health check")
