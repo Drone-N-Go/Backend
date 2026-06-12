@@ -46,7 +46,6 @@ Optional integration variables:
 
 | Variable | Description |
 |---|---|
-| `ADMIN_EMAIL` / `ADMIN_PASSWORD` | Initial admin seed account |
 | `SMIOTA_API_KEY` | Basic Auth username for Smiota webhook |
 | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | S3 upload credentials |
 | `AWS_REGION` | S3 region |

@@ -46,13 +46,6 @@ class UserUpdateRequest(BaseModel):
     school: Optional[str] = None
 
 
-class AdminCreateRequest(BaseModel):
-    email: EmailStr
-    password: str = Field(..., min_length=6)
-    first_name: str = Field(..., min_length=1, max_length=100)
-    last_name: str = Field(..., min_length=1, max_length=100)
-
-
 # ---------------------------------------------------------------------------
 # Responses
 # ---------------------------------------------------------------------------
@@ -76,10 +69,3 @@ class TokenResponse(BaseModel):
     refresh_token: str
     token_type: str = "bearer"
     user: UserResponse
-
-
-class UserListResponse(BaseModel):
-    items: list[UserResponse]
-    total: int
-    skip: int
-    limit: int

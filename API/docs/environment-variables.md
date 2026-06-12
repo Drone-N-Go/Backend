@@ -30,17 +30,6 @@ Never share this. Rotate it to instantly invalidate all active sessions.
 
 ---
 
-## ADMIN_EMAIL / ADMIN_PASSWORD
-
-```
-ADMIN_EMAIL=YOUR_ADMIN_EMAIL_HERE
-ADMIN_PASSWORD=YOUR_ADMIN_PASSWORD_HERE
-```
-
-Credentials for the seed admin account, created automatically on first startup.
-
----
-
 ## SMIOTA_API_KEY
 
 ```
@@ -56,7 +45,7 @@ The API key used to authenticate incoming Smiota webhook requests. Smiota sends 
 ```
 CORS_ORIGINS="*"
 # or in production:
-CORS_ORIGINS="https://app.droneandgo.io,https://admin.droneandgo.io"
+CORS_ORIGINS="https://app.droneandgo.io"
 ```
 
 Comma-separated list of allowed CORS origins. Use `*` for development. In production, set this to your app's exact origin(s).

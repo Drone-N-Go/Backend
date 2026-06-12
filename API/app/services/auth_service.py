@@ -2,7 +2,7 @@
 app/services/auth_service.py
 -----------------------------
 Business logic for authentication:
-  - register, login (with brute-force protection), refresh, admin creation
+  - register, login (with brute-force protection), refresh
 """
 
 import logging
@@ -25,7 +25,6 @@ from app.models.login_attempt import LoginAttempt
 from app.models.refresh_token import RefreshToken
 from app.models.user import User
 from app.schemas.user import (
-    AdminCreateRequest,
     TokenResponse,
     UserRegisterRequest,
     UserResponse,
@@ -43,7 +42,7 @@ def _hash_token(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
-async def _build_token_response(user: User, db: AsyncSession) -> TokenResponse:
+async def build_token_response(user: User, db: AsyncSession) -> TokenResponse:
     access_token = create_access_token(user.id, user.email)
     refresh_token = create_refresh_token(user.id)
     expires_at = datetime.now(timezone.utc) + timedelta(days=settings.refresh_token_expire_days)
@@ -100,7 +99,7 @@ async def register_user(body: UserRegisterRequest, db: AsyncSession) -> TokenRes
     db.add(user)
     await db.flush()
     logger.info("New user registered: %s", user.email)
-    return await _build_token_response(user, db)
+    return await build_token_response(user, db)
 
 
 async def login_user(
@@ -154,7 +153,7 @@ async def login_user(
     await db.flush()
 
     logger.info("User logged in: %s", user.email)
-    return await _build_token_response(user, db)
+    return await build_token_response(user, db)
 
 
 async def refresh_access_token(refresh_token: str, db: AsyncSession) -> TokenResponse:
@@ -206,7 +205,7 @@ async def refresh_access_token(refresh_token: str, db: AsyncSession) -> TokenRes
     db.add(token_record)
     await db.flush()
 
-    return await _build_token_response(user, db)
+    return await build_token_response(user, db)
 
 
 async def revoke_refresh_token(refresh_token: str | None, db: AsyncSession) -> None:
@@ -222,25 +221,3 @@ async def revoke_refresh_token(refresh_token: str | None, db: AsyncSession) -> N
     token_record.revoked_at = datetime.now(timezone.utc)
     db.add(token_record)
     await db.flush()
-
-
-async def create_admin_account(body: AdminCreateRequest, db: AsyncSession) -> User:
-    """Create a new admin-role user. Only callable by existing admins."""
-    existing = await db.execute(select(User).where(User.email == body.email.lower()))
-    if existing.scalar_one_or_none():
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="An account with this email already exists.",
-        )
-
-    admin = User(
-        email=body.email.lower(),
-        password_hash=hash_password(body.password),
-        first_name=body.first_name,
-        last_name=body.last_name,
-        role="admin",
-    )
-    db.add(admin)
-    await db.flush()
-    logger.info("Admin account created: %s", admin.email)
-    return admin

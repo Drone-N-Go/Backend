@@ -7,16 +7,7 @@ Pydantic v2 request/response schemas for damage reports and image uploads.
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, Field
-
-
-# ---------------------------------------------------------------------------
-# Requests
-# ---------------------------------------------------------------------------
-
-class ConditionUpdateRequest(BaseModel):
-    condition_status: str = Field(..., pattern="^(undamaged|damaged|needs_review)$")
-    admin_notes: Optional[str] = None
+from pydantic import BaseModel
 
 
 # ---------------------------------------------------------------------------

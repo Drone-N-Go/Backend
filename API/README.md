@@ -32,7 +32,7 @@ Drone N' Go allows users to rent drones from smart locker stations on university
 - Booking lifecycle (create → checkout → return → damage review)
 - Smiota locker webhook integration (passcode delivery)
 - Pre/post-rental condition image uploads to AWS S3
-- Admin analytics dashboard
+- Admin operations for staff roles, locker access, maintenance, and audited passcode reveal
 
 ---
 
@@ -151,10 +151,6 @@ Before first run against a real database, apply Alembic migrations:
 alembic upgrade head
 ```
 
-If `ADMIN_EMAIL` and `ADMIN_PASSWORD` are set, the API seeds that admin account on startup.
-
----
-
 ## API Documentation
 
 Interactive documentation is available at two URLs once the server is running:
@@ -202,14 +198,10 @@ See [docs/endpoints.md](docs/endpoints.md) for the full reference.
 | `POST` | `/api/auth/logout` | None | Clear cookies |
 | `GET` | `/api/auth/me` | User | Get own profile |
 | `POST` | `/api/auth/refresh` | None | Refresh access token |
-| `POST` | `/api/auth/create-admin` | Admin | Create admin account |
-| `GET` | `/api/users` | Admin | List all users |
 | `GET` | `/api/users/me/profile` | User | Get own profile |
 | `PUT` | `/api/users/me/profile` | User | Update own profile |
 | `GET` | `/api/drones` | Public | List drones |
-| `POST` | `/api/drones` | Admin | Create drone |
 | `GET` | `/api/locations` | Public | List locker locations |
-| `POST` | `/api/locations` | Admin | Create location |
 | `POST` | `/api/bookings` | User | Create booking |
 | `GET` | `/api/bookings` | User | List own bookings |
 | `GET` | `/api/bookings/{id}/passcode` | User | Get locker passcode |
@@ -226,8 +218,16 @@ See [docs/endpoints.md](docs/endpoints.md) for the full reference.
 | `POST` | `/api/bookings/{id}/images/pre-rental` | User | Upload pre-rental images |
 | `POST` | `/api/bookings/{id}/images/post-rental` | User | Upload post-rental images |
 | `POST` | `/api/webhooks/smiota` | Basic Auth | Smiota locker event |
-| `GET` | `/api/admin/analytics` | Admin | Analytics dashboard |
-| `PATCH` | `/api/admin/drones/{id}/condition` | Admin | Review drone condition |
+| `POST` | `/api/admin/setup/owner` | None | First Owner setup, self-disables after setup |
+| `GET` | `/api/admin/me` | Admin | Get admin profile and capabilities |
+| `GET` | `/api/admin/lockers/current-state` | Admin | List mapped locker state with masked passcodes |
+| `POST` | `/api/admin/lockers/{id}/reveal-passcode` | Admin | Reveal passcode and write audit event |
+| `PATCH` | `/api/admin/lockers/{id}/mapping` | Admin | Update Smiota locker mapping |
+| `PATCH` | `/api/admin/lockers/{id}/maintenance` | Admin | Update locker maintenance status |
+| `PATCH` | `/api/admin/lockers/{id}/drone` | Admin | Assign or unassign a drone from a locker |
+| `GET` | `/api/admin/maintenance/tasks` | Admin | List maintenance tasks in scope |
+| `POST` | `/api/admin/maintenance/tasks` | Admin | Create maintenance task |
+| `GET` | `/api/admin/stats` | Admin | Role-aware stats |
 
 ---
 

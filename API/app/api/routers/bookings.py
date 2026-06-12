@@ -7,8 +7,6 @@ Booking lifecycle endpoints:
   GET   /api/bookings/{id}
   GET   /api/bookings/{id}/passcode
   PATCH /api/bookings/{id}/cancel
-  PATCH /api/bookings/{id}/status          (admin)
-  PATCH /api/bookings/{id}/smiota-link     (admin)
 
 Damage / return endpoints:
   POST  /api/bookings/{id}/images/pre-rental
@@ -25,8 +23,6 @@ Damage / return endpoints:
   POST  /api/bookings/{id}/return-video/complete
   POST  /api/bookings/{id}/complete-return
 
-Admin condition review:
-  PATCH /api/admin/drones/{id}/condition   (defined in admin.py — imported here for proximity)
 """
 
 from typing import List
@@ -34,7 +30,7 @@ from typing import List
 from fastapi import APIRouter, Depends, File, Query, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.dependencies import get_current_user, require_admin
+from app.core.dependencies import get_current_user
 from app.db.session import get_db
 from app.models.user import User
 from app.schemas.booking import (
@@ -43,8 +39,6 @@ from app.schemas.booking import (
     EvidenceCompletionRequest,
     BookingListResponse,
     BookingResponse,
-    BookingSmiotaLinkRequest,
-    BookingStatusRequest,
     PasscodeResponse,
 )
 from app.core.booking_lifecycle import BOOKING_STATUS_PATTERN
@@ -76,7 +70,7 @@ async def create_booking(
 @router.get(
     "",
     response_model=BookingListResponse,
-    summary="List bookings (users see own; admins see all)",
+    summary="List the current user's bookings",
 )
 async def list_bookings(
     status: str | None = Query(
@@ -156,36 +150,6 @@ async def cancel_booking(
 ):
     booking = await booking_service.cancel_booking(booking_id, current_user, db)
     return await booking_service.get_booking_detail(booking.id, current_user, db)
-
-
-@router.patch(
-    "/{booking_id}/status",
-    response_model=BookingResponse,
-    summary="Manually update a booking status — admin only",
-)
-async def update_booking_status(
-    booking_id: str,
-    body: BookingStatusRequest,
-    db: AsyncSession = Depends(get_db),
-    _admin: User = Depends(require_admin),
-):
-    booking = await booking_service.update_booking_status(booking_id, body.status, db)
-    return BookingResponse.model_validate(booking)
-
-
-@router.patch(
-    "/{booking_id}/smiota-link",
-    response_model=BookingResponse,
-    summary="Link a Smiota object ID to a booking — admin only",
-)
-async def link_smiota(
-    booking_id: str,
-    body: BookingSmiotaLinkRequest,
-    db: AsyncSession = Depends(get_db),
-    _admin: User = Depends(require_admin),
-):
-    booking = await booking_service.link_smiota_object(booking_id, body.smiota_object_id, db)
-    return BookingResponse.model_validate(booking)
 
 
 # --------------------------------------------------------------------------- #

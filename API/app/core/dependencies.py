@@ -4,16 +4,27 @@ app/core/dependencies.py
 FastAPI dependency-injection callables used across routers.
 
   - get_current_user  → requires a valid access JWT
-  - require_admin     → requires valid JWT AND role == "admin"
 """
 
 from fastapi import Cookie, Depends, Header, HTTPException, status
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+from dataclasses import dataclass
 
+from app.core.admin_permissions import capabilities_for_role, role_has_capability
 from app.core.security import decode_token
 from app.db.session import get_db
+from app.models.admin_profile import AdminProfile
 from app.models.user import User
+
+
+@dataclass(frozen=True)
+class AdminContext:
+    user: User
+    profile: AdminProfile
+    capabilities: set[str]
+    assigned_location_ids: set[str]
 
 
 async def _resolve_user_from_token(token: str, db: AsyncSession) -> User:
@@ -86,13 +97,36 @@ async def get_optional_user(
     return await _resolve_user_from_token(token, db)
 
 
-async def require_admin(
+async def require_admin_profile(
     current_user: User = Depends(get_current_user),
-) -> User:
-    """Extend get_current_user — additionally requires role == 'admin'."""
-    if current_user.role != "admin":
+    db: AsyncSession = Depends(get_db),
+) -> AdminContext:
+    result = await db.execute(
+        select(AdminProfile)
+        .where(AdminProfile.user_id == current_user.id, AdminProfile.status == "active")
+        .options(selectinload(AdminProfile.user), selectinload(AdminProfile.location_assignments))
+    )
+    profile = result.scalar_one_or_none()
+    if not profile:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Administrator privileges required.",
+            detail="Active admin access required.",
         )
-    return current_user
+    return AdminContext(
+        user=current_user,
+        profile=profile,
+        capabilities=capabilities_for_role(profile.role),
+        assigned_location_ids={assignment.location_id for assignment in profile.location_assignments},
+    )
+
+
+def require_capability(capability: str):
+    async def checker(context: AdminContext = Depends(require_admin_profile)) -> AdminContext:
+        if not role_has_capability(context.profile.role, capability):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Admin capability required: {capability}.",
+            )
+        return context
+
+    return checker

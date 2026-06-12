@@ -37,6 +37,8 @@ class DroneCreateRequest(BaseModel):
 
 
 class DroneUpdateRequest(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
     model_name: Optional[str] = Field(None, min_length=1, max_length=255)
     subtitle: Optional[str] = None
     description: Optional[str] = None

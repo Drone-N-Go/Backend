@@ -41,12 +41,6 @@ class Settings(BaseSettings):
     refresh_token_expire_days: int = 7
 
     # ------------------------------------------------------------------ #
-    # Admin seed account
-    # ------------------------------------------------------------------ #
-    admin_email: str | None = None
-    admin_password: str | None = None
-
-    # ------------------------------------------------------------------ #
     # Smiota webhook
     # ------------------------------------------------------------------ #
     smiota_api_key: str | None = None
@@ -91,7 +85,6 @@ class Settings(BaseSettings):
         sensitive_values = {
             "database_url": self.database_url,
             "secret_key": self.secret_key,
-            "admin_password": self.admin_password,
             "smiota_api_key": self.smiota_api_key,
             "aws_access_key_id": self.aws_access_key_id,
             "aws_secret_access_key": self.aws_secret_access_key,

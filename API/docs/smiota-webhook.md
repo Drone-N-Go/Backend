@@ -9,7 +9,8 @@ This document describes how Drone N' Go integrates with Smiota smart lockers.
 When a drone is placed in or picked up from a Smiota locker, Smiota sends a `POST` request to our webhook endpoint. The API uses this to:
 
 1. Store the locker passcode on the booking (`PackageDeposited`)
-2. Activate the booking when the user picks up the drone (`PackagePickedUp`)
+2. Audit locker pickup events without skipping the app-driven verification flow (`PackagePickedUp`)
+3. Feed the Admin locker dashboard through explicit Smiota-to-locker-unit mapping
 
 ---
 
@@ -72,19 +73,21 @@ Triggered when the user opens the locker and picks up the drone.
 
 ---
 
-## Linking a Booking to a Smiota Object
+## Matching a Booking to a Smiota Object
 
-Before Smiota events can be matched to a booking, an admin must link the `smiota_object_id`:
+Before Smiota events can be matched to a booking, the booking must already have a `smiota_object_id` value from the internal locker provisioning flow. The public API no longer exposes a manual link endpoint.
 
-```
-PATCH /api/bookings/{booking_id}/smiota-link
-```
+---
 
-```json
-{ "smiota_object_id": "smiota-obj-abc123" }
-```
+## Mapping Smiota to Locker Units
 
-This is the bridge between your booking system and Smiota's object ID.
+Admin locker state uses explicit mapping fields on `locker_units`:
+
+- `smiota_locker_name`
+- `smiota_unit_identifier`
+- `smiota_metadata`
+
+The Admin API uses these fields to connect raw Smiota events to internal locker units. Passcodes are masked in `GET /api/admin/lockers/current-state` and only returned by `POST /api/admin/lockers/{locker_unit_id}/reveal-passcode`, which writes a `locker_access_events` audit record.
 
 ---
 

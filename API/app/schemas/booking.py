@@ -10,9 +10,6 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
-from app.core.booking_lifecycle import BOOKING_STATUS_PATTERN
-
-
 # ---------------------------------------------------------------------------
 # Requests
 # ---------------------------------------------------------------------------
@@ -23,14 +20,6 @@ class BookingCreateRequest(BaseModel):
     pickup_time: str = Field(..., description="ISO 8601 datetime string")
     rental_duration: int = Field(..., gt=0)
     rental_type: str = Field(..., pattern="^(hourly|daily)$")
-
-
-class BookingStatusRequest(BaseModel):
-    status: str = Field(..., pattern=BOOKING_STATUS_PATTERN)
-
-
-class BookingSmiotaLinkRequest(BaseModel):
-    smiota_object_id: str = Field(..., min_length=1)
 
 
 class BookingReturnRequest(BaseModel):

@@ -48,23 +48,7 @@ Exchange a refresh token (from cookie) for a new access token.
 
 ---
 
-### `POST /api/auth/create-admin`
-Create a new admin account. Requires: `Admin`.
-
-```json
-{ "email": "newadmin@droneandgo.io", "password": "secure", "first_name": "Bob", "last_name": "Smith" }
-```
-
----
-
 ## Users
-
-### `GET /api/users`
-List all users with pagination. Requires: `Admin`.
-
-Query params: `skip`, `limit`, `role` (`user` | `admin`)
-
----
 
 ### `GET /api/users/me/profile`
 Get the authenticated user's profile. Requires: `User`.
@@ -77,16 +61,6 @@ Update the authenticated user's profile. Requires: `User`.
 ```json
 { "first_name": "Jane", "last_name": "Smith", "school": "Mizzou" }
 ```
-
----
-
-### `GET /api/users/{user_id}`
-Get a specific user by ID. Requires: `Admin`.
-
----
-
-### `GET /api/users/{user_id}/rentals`
-Get rental history for a specific user. Requires: `Admin`.
 
 ---
 
@@ -104,40 +78,6 @@ Get a single drone by ID. Public.
 
 ---
 
-### `POST /api/drones`
-Create a drone. Requires: `Admin`.
-
-```json
-{
-  "model_name": "DJI Mini 4 Pro",
-  "serial_number": "SN-001-2024",
-  "assigned_locker_location_id": "<uuid>",
-  "hourly_rate": 15.00,
-  "daily_rate": 75.00
-}
-```
-
----
-
-### `PUT /api/drones/{drone_id}`
-Update drone details. Requires: `Admin`.
-
----
-
-### `DELETE /api/drones/{drone_id}`
-Delete a drone. Requires: `Admin`.
-
----
-
-### `PATCH /api/drones/{drone_id}/status`
-Override drone status. Requires: `Admin`.
-
-```json
-{ "status": "maintenance" }
-```
-
----
-
 ## Locations & Lockers
 
 ### `GET /api/locations`
@@ -150,44 +90,8 @@ Get a location with all its locker units. Public.
 
 ---
 
-### `POST /api/locations`
-Create a locker location. Requires: `Admin`.
-
-```json
-{
-  "campus_name": "University of Missouri",
-  "address": "Columbia, MO 65201",
-  "latitude": 38.9404,
-  "longitude": -92.3277,
-  "building_name": "Lafferre Hall",
-  "landmarks": "Near the engineering fountain",
-  "directions": "Enter through the north entrance, lockers are on the right."
-}
-```
-
----
-
-### `PUT /api/locations/{location_id}` — Update. Requires: `Admin`.
-### `DELETE /api/locations/{location_id}` — Delete. Requires: `Admin`.
-
----
-
 ### `GET /api/locations/{location_id}/units`
 List locker units at a location. Public.
-
----
-
-### `POST /api/locations/{location_id}/units`
-Add a locker unit. Requires: `Admin`.
-
-```json
-{ "unit_number": "A3", "status": "available" }
-```
-
----
-
-### `PUT /api/locations/{location_id}/units/{unit_id}` — Update unit. Requires: `Admin`.
-### `DELETE /api/locations/{location_id}/units/{unit_id}` — Delete unit. Requires: `Admin`.
 
 ---
 
@@ -209,14 +113,14 @@ Create a booking. Requires: `User`. Marks drone as `rented`.
 ---
 
 ### `GET /api/bookings`
-List bookings. Users see only their own. Admins see all.
+List the authenticated user's bookings.
 
 Query params: `status`, `skip`, `limit`
 
 ---
 
 ### `GET /api/bookings/{booking_id}`
-Get a single booking. Owner or admin only.
+Get a single booking owned by the authenticated user.
 
 ---
 
@@ -227,24 +131,6 @@ Get the Smiota locker passcode. Available after `PackageDeposited` webhook.
 
 ### `PATCH /api/bookings/{booking_id}/cancel`
 Cancel a booking. Frees the drone back to `available`.
-
----
-
-### `PATCH /api/bookings/{booking_id}/status`
-Manually update booking status. Requires: `Admin`.
-
-```json
-{ "status": "in_use" }
-```
-
----
-
-### `PATCH /api/bookings/{booking_id}/smiota-link`
-Link a Smiota `objectId` to a booking. Requires: `Admin`.
-
-```json
-{ "smiota_object_id": "smiota-obj-abc123" }
-```
 
 ---
 
@@ -289,7 +175,7 @@ Evidence completion endpoints accept a development/demo override:
 { "skip_evidence_check": true }
 ```
 
-Complete return accepts optional admin notes:
+Complete return accepts optional notes:
 
 ```json
 { "notes": "Minor scuff on left arm noticed." }
@@ -319,21 +205,146 @@ Supported `notification_type` values: `PackageDeposited`, `PackagePickedUp`
 
 ## Admin
 
-### `GET /api/admin/analytics`
-Full business analytics dashboard. Requires: `Admin`.
+Admin endpoints use the normal JWT bearer token, then require an active `admin_profiles` row linked to that user.
 
-Query params: `days` (default `30`, max `365`)
+Roles:
 
----
+- `owner` — full access.
+- `master_developer` — full access.
+- `manager` — full access except Owner/Master Developer account management.
+- `developer` — platform and operations access, excluding money and Owner/Master Developer account management.
+- `admin` — assigned-location operations, maintenance, support, locker state, and audited passcode reveal.
 
-### `PATCH /api/admin/drones/{drone_id}/condition`
-Review drone condition after return. Requires: `Admin`.
+### `POST /api/admin/setup/owner`
+Create the first Owner account and admin profile. This endpoint only works while there are zero active admin profiles; future calls return `409`.
 
 ```json
 {
-  "condition_status": "undamaged",
-  "admin_notes": "Inspected, all good."
+  "email": "owner@droneandgo.io",
+  "password": "secret123",
+  "first_name": "James",
+  "last_name": "McDougall",
+  "title": "Owner"
 }
 ```
 
-`condition_status` values: `undamaged` | `damaged` | `needs_review`
+---
+
+### `GET /api/admin/me`
+Return the current admin profile, capabilities, and assigned location IDs.
+
+---
+
+### `GET /api/admin/staff`
+List admin staff profiles. Requires staff-management capability.
+
+---
+
+### `POST /api/admin/staff`
+Create staff and assign optional locations. Managers and Developers cannot manage Owner or Master Developer accounts.
+
+```json
+{
+  "email": "tech@example.com",
+  "password": "secret123",
+  "first_name": "Campus",
+  "last_name": "Tech",
+  "role": "admin",
+  "assigned_location_ids": ["<location-id>"]
+}
+```
+
+---
+
+### `PATCH /api/admin/staff/{profile_id}/status`
+Suspend or reactivate a staff profile.
+
+```json
+{ "status": "suspended" }
+```
+
+---
+
+### `GET /api/admin/lockers/current-state`
+List locker units in the admin's scope. Passcodes are masked and only exposed through audited reveal.
+
+Query params: `location_id`, `skip`, `limit`
+
+---
+
+### `POST /api/admin/lockers/{locker_unit_id}/reveal-passcode`
+Reveal the current Smiota passcode for a mapped locker and write a `locker_access_events` audit record.
+
+```json
+{
+  "reason": "Opening locker for drone maintenance",
+  "app_context": { "platform": "ios" }
+}
+```
+
+---
+
+### `PATCH /api/admin/lockers/{locker_unit_id}/mapping`
+Attach explicit Smiota identifiers to a locker unit.
+
+```json
+{
+  "smiota_locker_name": "Locker-A3",
+  "smiota_unit_identifier": "smiota-unit-a3",
+  "smiota_metadata": {}
+}
+```
+
+---
+
+### `PATCH /api/admin/lockers/{locker_unit_id}/maintenance`
+Update locker status with a reason.
+
+```json
+{ "status": "maintenance", "reason": "Keypad unresponsive" }
+```
+
+---
+
+### `PATCH /api/admin/lockers/{locker_unit_id}/drone`
+Assign or unassign the current drone in a locker.
+
+```json
+{ "drone_id": "<drone-id>" }
+```
+
+Use `{"drone_id": null}` to unassign.
+
+---
+
+### `GET /api/admin/maintenance/tasks`
+List maintenance tasks in scope.
+
+---
+
+### `POST /api/admin/maintenance/tasks`
+Create a maintenance task.
+
+```json
+{
+  "title": "Inspect locker A3",
+  "location_id": "<location-id>",
+  "locker_unit_id": "<locker-unit-id>",
+  "priority": "normal"
+}
+```
+
+---
+
+### `PATCH /api/admin/maintenance/tasks/{task_id}`
+Update task status, assignment, or resolution notes.
+
+---
+
+### `GET /api/admin/stats`
+Return role-aware stats. Money totals are omitted for Developer and Admin roles.
+
+---
+
+### `GET /api/admin/smiota/unmapped-events`
+Return recent Smiota events that do not map to a locker unit. Requires global admin scope.

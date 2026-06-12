@@ -2,7 +2,7 @@
 app/services/booking_service.py
 --------------------------------
 Business logic for the full drone booking lifecycle:
-  create → link smiota → webhook events → passcode → return → damage review
+  create → webhook events → passcode → return → damage review
 """
 
 import logging
@@ -87,8 +87,8 @@ def booking_response(booking: Booking, favorite_ids: set[str] | None = None) -> 
     return response
 
 
-def _assert_booking_owner_or_admin(booking: Booking, current_user: User) -> None:
-    if current_user.role != "admin" and booking.user_id != current_user.id:
+def _assert_current_user_booking(booking: Booking, current_user: User) -> None:
+    if booking.user_id != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You do not have access to this booking.",
@@ -256,10 +256,8 @@ async def list_bookings(
     query = select(Booking)
     count_query = select(func.count()).select_from(Booking)
 
-    # Non-admins only see their own bookings
-    if current_user.role != "admin":
-        query = query.where(Booking.user_id == current_user.id)
-        count_query = count_query.where(Booking.user_id == current_user.id)
+    query = query.where(Booking.user_id == current_user.id)
+    count_query = count_query.where(Booking.user_id == current_user.id)
 
     if status_filter:
         query = query.where(Booking.status == status_filter)
@@ -286,7 +284,7 @@ async def get_booking(
     booking_id: str, current_user: User, db: AsyncSession
 ) -> Booking:
     booking = await _get_booking_or_404(booking_id, db)
-    _assert_booking_owner_or_admin(booking, current_user)
+    _assert_current_user_booking(booking, current_user)
     return booking
 
 
@@ -294,7 +292,7 @@ async def get_booking_detail(
     booking_id: str, current_user: User, db: AsyncSession
 ) -> BookingResponse:
     booking = await _get_booking_detail_or_404(booking_id, db)
-    _assert_booking_owner_or_admin(booking, current_user)
+    _assert_current_user_booking(booking, current_user)
     return booking_response(booking)
 
 
@@ -365,7 +363,7 @@ async def get_passcode(
     booking_id: str, current_user: User, db: AsyncSession
 ) -> PasscodeResponse:
     booking = await _get_booking_or_404(booking_id, db)
-    _assert_booking_owner_or_admin(booking, current_user)
+    _assert_current_user_booking(booking, current_user)
 
     if not booking.smiota_passcode:
         raise HTTPException(
@@ -389,7 +387,7 @@ async def cancel_booking(
     booking_id: str, current_user: User, db: AsyncSession
 ) -> Booking:
     booking = await _get_booking_or_404(booking_id, db)
-    _assert_booking_owner_or_admin(booking, current_user)
+    _assert_current_user_booking(booking, current_user)
 
     if booking.status in TERMINAL_BOOKING_STATUSES:
         raise HTTPException(
@@ -414,36 +412,6 @@ async def cancel_booking(
 
 
 # --------------------------------------------------------------------------- #
-# Admin: update booking status
-# --------------------------------------------------------------------------- #
-
-async def update_booking_status(
-    booking_id: str, new_status: str, db: AsyncSession
-) -> Booking:
-    booking = await _get_booking_or_404(booking_id, db)
-    booking.status = new_status
-    _stamp_status_timestamp(booking, new_status)
-    db.add(booking)
-    await db.flush()
-    return booking
-
-
-# --------------------------------------------------------------------------- #
-# Admin: link Smiota object ID
-# --------------------------------------------------------------------------- #
-
-async def link_smiota_object(
-    booking_id: str, smiota_object_id: str, db: AsyncSession
-) -> Booking:
-    booking = await _get_booking_or_404(booking_id, db)
-    booking.smiota_object_id = smiota_object_id
-    db.add(booking)
-    await db.flush()
-    logger.info("Smiota object %s linked to booking %s", smiota_object_id, booking_id)
-    return booking
-
-
-# --------------------------------------------------------------------------- #
 # Frontend-aligned lifecycle transitions
 # --------------------------------------------------------------------------- #
 
@@ -451,7 +419,7 @@ async def mark_locker_opened(
     booking_id: str, current_user: User, db: AsyncSession
 ) -> Booking:
     booking = await _get_booking_or_404(booking_id, db)
-    _assert_booking_owner_or_admin(booking, current_user)
+    _assert_current_user_booking(booking, current_user)
     return await _advance_and_flush(booking, "locker_opened", db)
 
 
@@ -459,7 +427,7 @@ async def mark_case_verified(
     booking_id: str, current_user: User, db: AsyncSession
 ) -> Booking:
     booking = await _get_booking_or_404(booking_id, db)
-    _assert_booking_owner_or_admin(booking, current_user)
+    _assert_current_user_booking(booking, current_user)
     return await _advance_and_flush(booking, "case_verified", db)
 
 
@@ -470,7 +438,7 @@ async def complete_before_photos(
     db: AsyncSession,
 ) -> Booking:
     booking = await _get_booking_or_404(booking_id, db)
-    _assert_booking_owner_or_admin(booking, current_user)
+    _assert_current_user_booking(booking, current_user)
     if booking.status != "before_photos_complete":
         report = await _get_damage_report(booking_id, db)
         _assert_evidence(report, "pre_rental", skip_evidence_check)
@@ -481,7 +449,7 @@ async def start_use(
     booking_id: str, current_user: User, db: AsyncSession
 ) -> Booking:
     booking = await _get_booking_or_404(booking_id, db)
-    _assert_booking_owner_or_admin(booking, current_user)
+    _assert_current_user_booking(booking, current_user)
     return await _advance_and_flush(booking, "in_use", db)
 
 
@@ -489,7 +457,7 @@ async def start_return(
     booking_id: str, current_user: User, db: AsyncSession
 ) -> Booking:
     booking = await _get_booking_or_404(booking_id, db)
-    _assert_booking_owner_or_admin(booking, current_user)
+    _assert_current_user_booking(booking, current_user)
     return await _advance_and_flush(booking, "return_started", db)
 
 
@@ -500,7 +468,7 @@ async def complete_after_photos(
     db: AsyncSession,
 ) -> Booking:
     booking = await _get_booking_or_404(booking_id, db)
-    _assert_booking_owner_or_admin(booking, current_user)
+    _assert_current_user_booking(booking, current_user)
     if booking.status != "after_photos_complete":
         report = await _get_damage_report(booking_id, db)
         _assert_evidence(report, "post_rental", skip_evidence_check)
@@ -511,7 +479,7 @@ async def mark_return_locker_opened(
     booking_id: str, current_user: User, db: AsyncSession
 ) -> Booking:
     booking = await _get_booking_or_404(booking_id, db)
-    _assert_booking_owner_or_admin(booking, current_user)
+    _assert_current_user_booking(booking, current_user)
     return await _advance_and_flush(booking, "return_locker_opened", db)
 
 
@@ -522,7 +490,7 @@ async def complete_return_video(
     db: AsyncSession,
 ) -> Booking:
     booking = await _get_booking_or_404(booking_id, db)
-    _assert_booking_owner_or_admin(booking, current_user)
+    _assert_current_user_booking(booking, current_user)
     if booking.status != "return_video_complete":
         report = await _get_damage_report(booking_id, db)
         _assert_evidence(report, "return_video", skip_evidence_check)
@@ -533,7 +501,7 @@ async def complete_return(
     booking_id: str, notes: str | None, current_user: User, db: AsyncSession
 ) -> Booking:
     booking = await _get_booking_or_404(booking_id, db)
-    _assert_booking_owner_or_admin(booking, current_user)
+    _assert_current_user_booking(booking, current_user)
     _advance_booking_status(booking, "returned")
     db.add(booking)
 

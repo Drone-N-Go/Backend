@@ -4,25 +4,15 @@ app/api/routers/drones.py
 Drone management endpoints:
   GET    /api/drones                        (public)
   GET    /api/drones/{drone_id}             (public)
-  POST   /api/drones                        (admin)
-  PUT    /api/drones/{drone_id}             (admin)
-  DELETE /api/drones/{drone_id}             (admin)
-  PATCH  /api/drones/{drone_id}/status      (admin)
 """
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.dependencies import get_current_user, get_optional_user, require_admin
+from app.core.dependencies import get_current_user, get_optional_user
 from app.db.session import get_db
 from app.models.user import User
-from app.schemas.drone import (
-    DroneCreateRequest,
-    DroneListResponse,
-    DroneResponse,
-    DroneStatusRequest,
-    DroneUpdateRequest,
-)
+from app.schemas.drone import DroneListResponse, DroneResponse
 from app.services import drone_service
 
 router = APIRouter(prefix="/drones", tags=["Drones"])
@@ -64,64 +54,6 @@ async def get_drone(
     current_user: User | None = Depends(get_optional_user),
 ):
     return await drone_service.get_drone_response(drone_id, db, current_user)
-
-
-@router.post(
-    "",
-    response_model=DroneResponse,
-    status_code=201,
-    summary="Create a new drone — admin only",
-)
-async def create_drone(
-    body: DroneCreateRequest,
-    db: AsyncSession = Depends(get_db),
-    _admin: User = Depends(require_admin),
-):
-    drone = await drone_service.create_drone(body, db)
-    return await drone_service.get_drone_response(drone.id, db)
-
-
-@router.put(
-    "/{drone_id}",
-    response_model=DroneResponse,
-    summary="Update a drone — admin only",
-)
-async def update_drone(
-    drone_id: str,
-    body: DroneUpdateRequest,
-    db: AsyncSession = Depends(get_db),
-    _admin: User = Depends(require_admin),
-):
-    drone = await drone_service.update_drone(drone_id, body, db)
-    return await drone_service.get_drone_response(drone.id, db)
-
-
-@router.delete(
-    "/{drone_id}",
-    status_code=204,
-    summary="Delete a drone — admin only",
-)
-async def delete_drone(
-    drone_id: str,
-    db: AsyncSession = Depends(get_db),
-    _admin: User = Depends(require_admin),
-):
-    await drone_service.delete_drone(drone_id, db)
-
-
-@router.patch(
-    "/{drone_id}/status",
-    response_model=DroneResponse,
-    summary="Override a drone's status — admin only",
-)
-async def update_drone_status(
-    drone_id: str,
-    body: DroneStatusRequest,
-    db: AsyncSession = Depends(get_db),
-    _admin: User = Depends(require_admin),
-):
-    drone = await drone_service.update_drone_status(drone_id, body.status, db)
-    return await drone_service.get_drone_response(drone.id, db)
 
 
 @router.post(

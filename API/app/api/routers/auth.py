@@ -7,17 +7,15 @@ Authentication endpoints:
   POST /api/auth/logout
   GET  /api/auth/me
   POST /api/auth/refresh
-  POST /api/auth/create-admin
 """
 
 from fastapi import APIRouter, Cookie, Depends, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.dependencies import get_current_user, require_admin
+from app.core.dependencies import get_current_user
 from app.db.session import get_db
 from app.models.user import User
 from app.schemas.user import (
-    AdminCreateRequest,
     RefreshTokenRequest,
     TokenResponse,
     UserLoginRequest,
@@ -131,21 +129,3 @@ async def refresh(
     token_data = await auth_service.refresh_access_token(token, db)
     _set_auth_cookies(response, token_data)
     return token_data
-
-
-@router.post(
-    "/create-admin",
-    response_model=dict,
-    status_code=201,
-    summary="Create a new admin account (admin only)",
-)
-async def create_admin(
-    body: AdminCreateRequest,
-    db: AsyncSession = Depends(get_db),
-    _admin: User = Depends(require_admin),
-):
-    admin = await auth_service.create_admin_account(body, db)
-    return {
-        "message": "Admin account created.",
-        "user": UserResponse.model_validate(admin),
-    }
