@@ -37,6 +37,10 @@ class EvidenceCompletionRequest(BaseModel):
     )
 
 
+class CaseQRVerificationRequest(BaseModel):
+    qr_payload: str = Field(..., min_length=1)
+
+
 # ---------------------------------------------------------------------------
 # Responses
 # ---------------------------------------------------------------------------

@@ -91,6 +91,7 @@ class LockerMaintenanceRequest(BaseModel):
 
 class LockerDroneAssignmentRequest(BaseModel):
     drone_id: Optional[str] = None
+    require_active_case_qr: bool = True
 
 
 class SmiotaEventSummary(BaseModel):
@@ -110,6 +111,7 @@ class AdminDroneSummary(BaseModel):
     model_name: str
     serial_number: str
     status: str
+    image_urls: list[str] = []
 
 
 class AdminBookingSummary(BaseModel):
@@ -215,7 +217,9 @@ class AdminLockerUnitCreateRequest(BaseModel):
 
 
 class DroneIntakeRequest(BaseModel):
-    serial_number: str = Field(..., min_length=1, max_length=255)
+    drone_id: Optional[str] = None
+    serial_number: Optional[str] = Field(None, min_length=1, max_length=255)
+    require_active_case_qr: bool = True
     photo_data: list[str] = Field(default_factory=list, description="Base64-encoded JPEG images")
 
 
@@ -236,6 +240,45 @@ class AdminDroneLookupResponse(BaseModel):
     serial_number: str
     status: str
     image_urls: list[str] = []
+
+
+class AdminDroneSearchResponse(BaseModel):
+    items: list[AdminDroneLookupResponse]
+    total: int
+
+
+class CaseQRGenerateRequest(BaseModel):
+    action: str = Field("generate_new", pattern="^generate_new$")
+    reason: str = Field(..., min_length=1, max_length=500)
+
+
+class CaseQRVoidAndRegenerateRequest(BaseModel):
+    reason: str = Field(..., min_length=1, max_length=500)
+
+
+class CaseQRConfirmRequest(BaseModel):
+    qr_payload: str = Field(..., min_length=1)
+
+
+class CaseQRLookupRequest(BaseModel):
+    qr_payload: str = Field(..., min_length=1)
+
+
+class CaseQRTokenResponse(BaseModel):
+    token_id: str
+    drone_id: str
+    status: str
+    qr_payload: str
+    label_title: str
+    label_subtitle: str
+    drone: AdminDroneSummary
+
+
+class CaseQRTokenLookupResponse(BaseModel):
+    token_id: str
+    drone_id: str
+    status: str
+    drone: AdminDroneSummary
 
 
 class AdminStatsResponse(BaseModel):

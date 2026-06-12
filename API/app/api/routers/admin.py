@@ -23,12 +23,19 @@ from app.core.dependencies import AdminContext, require_admin_profile, require_c
 from app.db.session import get_db
 from app.schemas.admin import (
     AdminDroneLookupResponse,
+    AdminDroneSearchResponse,
     AdminLocationCreateRequest,
     AdminLockerUnitCreateRequest,
     AdminMeResponse,
     AdminProfileListResponse,
     AdminProfileResponse,
     AdminStatsResponse,
+    CaseQRConfirmRequest,
+    CaseQRGenerateRequest,
+    CaseQRLookupRequest,
+    CaseQRTokenLookupResponse,
+    CaseQRTokenResponse,
+    CaseQRVoidAndRegenerateRequest,
     DroneIntakeRequest,
     DroneIntakeResponse,
     LockerCurrentStateListResponse,
@@ -49,6 +56,7 @@ from app.schemas.admin import (
     StaffRoleUpdateRequest,
     StaffStatusRequest,
 )
+from app.schemas.drone import DroneCreateRequest
 from app.schemas.location import LocationResponse, LockerUnitResponse
 from app.services import admin_service
 
@@ -353,6 +361,126 @@ async def lookup_drone_by_serial(
 
 
 @router.post(
+    "/drones",
+    response_model=AdminDroneLookupResponse,
+    status_code=201,
+    summary="Create a drone inventory record",
+)
+async def create_drone(
+    body: DroneCreateRequest,
+    db: AsyncSession = Depends(get_db),
+    context: AdminContext = Depends(require_capability(MANAGE_DRONES)),
+):
+    return await admin_service.create_admin_drone(context, body, db)
+
+
+@router.get(
+    "/drones/search",
+    response_model=AdminDroneSearchResponse,
+    summary="Search drone inventory by model or serial number",
+)
+async def search_drones(
+    q: str | None = Query(None, min_length=1),
+    serial_number: str | None = Query(None, min_length=1),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+    context: AdminContext = Depends(require_capability(MANAGE_DRONES)),
+):
+    return await admin_service.search_admin_drones(
+        context,
+        db,
+        q=q,
+        serial_number=serial_number,
+        skip=skip,
+        limit=limit,
+    )
+
+
+@router.post(
+    "/drones/{drone_id}/case-qr",
+    response_model=CaseQRTokenResponse,
+    status_code=201,
+    summary="Generate a pending printable case QR token for a drone",
+)
+async def generate_case_qr(
+    drone_id: str,
+    body: CaseQRGenerateRequest,
+    db: AsyncSession = Depends(get_db),
+    context: AdminContext = Depends(require_capability(MANAGE_DRONES)),
+):
+    return await admin_service.generate_case_qr_token(context, drone_id, body.reason, db)
+
+
+@router.get(
+    "/case-qr-tokens/{token_id}/print-payload",
+    response_model=CaseQRTokenResponse,
+    summary="Retrieve the printable QR payload for a pending or active case QR token",
+)
+async def get_case_qr_print_payload(
+    token_id: str,
+    db: AsyncSession = Depends(get_db),
+    context: AdminContext = Depends(require_capability(MANAGE_DRONES)),
+):
+    return await admin_service.get_case_qr_print_payload(context, token_id, db)
+
+
+@router.post(
+    "/case-qr-tokens/{token_id}/void-and-regenerate",
+    response_model=CaseQRTokenResponse,
+    status_code=201,
+    summary="Void a case QR token and generate a new pending printable token",
+)
+async def void_and_regenerate_case_qr(
+    token_id: str,
+    body: CaseQRVoidAndRegenerateRequest,
+    db: AsyncSession = Depends(get_db),
+    context: AdminContext = Depends(require_capability(MANAGE_DRONES)),
+):
+    return await admin_service.void_and_regenerate_case_qr_token(context, token_id, body.reason, db)
+
+
+@router.post(
+    "/case-qr-tokens/{token_id}/confirm",
+    response_model=CaseQRTokenResponse,
+    summary="Confirm a printed case QR token by scanning the physical label",
+)
+async def confirm_case_qr(
+    token_id: str,
+    body: CaseQRConfirmRequest,
+    db: AsyncSession = Depends(get_db),
+    context: AdminContext = Depends(require_capability(MANAGE_DRONES)),
+):
+    return await admin_service.confirm_case_qr_token(context, token_id, body.qr_payload, db)
+
+
+@router.post(
+    "/case-qr-tokens/lookup",
+    response_model=CaseQRTokenLookupResponse,
+    summary="Look up a scanned case QR token without exposing its printable payload",
+)
+async def lookup_case_qr(
+    body: CaseQRLookupRequest,
+    db: AsyncSession = Depends(get_db),
+    context: AdminContext = Depends(require_capability(MANAGE_DRONES)),
+):
+    return await admin_service.lookup_case_qr_token(context, body.qr_payload, db)
+
+
+@router.delete(
+    "/lockers/{locker_unit_id}/drone",
+    response_model=LockerCurrentStateResponse,
+    summary="Remove the drone from a locker unit — sets unit back to available",
+)
+async def remove_drone_from_unit(
+    locker_unit_id: str,
+    db: AsyncSession = Depends(get_db),
+    context: AdminContext = Depends(require_capability(MANAGE_DRONES)),
+):
+    return await admin_service.remove_drone_from_unit(context, locker_unit_id, db)
+
+
+@router.post(
     "/lockers/{locker_unit_id}/intake",
     response_model=DroneIntakeResponse,
     status_code=201,
@@ -422,6 +550,20 @@ async def stats(
     context: AdminContext = Depends(require_admin_profile),
 ):
     return await admin_service.get_stats(context, db)
+
+
+@router.get(
+    "/smiota/events",
+    response_model=list[SmiotaEventSummary],
+    summary="List recent Smiota webhook events",
+)
+async def list_smiota_events(
+    limit: int = Query(100, ge=1, le=500),
+    skip: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+    context: AdminContext = Depends(require_admin_profile),
+):
+    return await admin_service.list_smiota_events(context, db, limit=limit, skip=skip)
 
 
 @router.get(

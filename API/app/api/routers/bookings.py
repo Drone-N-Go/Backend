@@ -36,6 +36,7 @@ from app.models.user import User
 from app.schemas.booking import (
     BookingCreateRequest,
     BookingReturnRequest,
+    CaseQRVerificationRequest,
     EvidenceCompletionRequest,
     BookingListResponse,
     BookingResponse,
@@ -236,10 +237,11 @@ async def mark_locker_opened(
 )
 async def mark_case_verified(
     booking_id: str,
+    body: CaseQRVerificationRequest,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    booking = await booking_service.mark_case_verified(booking_id, current_user, db)
+    booking = await booking_service.mark_case_verified(booking_id, body.qr_payload, current_user, db)
     return await booking_service.get_booking_detail(booking.id, current_user, db)
 
 
@@ -285,6 +287,21 @@ async def start_return(
     current_user: User = Depends(get_current_user),
 ):
     booking = await booking_service.start_return(booking_id, current_user, db)
+    return await booking_service.get_booking_detail(booking.id, current_user, db)
+
+
+@router.post(
+    "/{booking_id}/return/case-verified",
+    response_model=BookingResponse,
+    summary="Verify return case QR and start return flow",
+)
+async def mark_return_case_verified(
+    booking_id: str,
+    body: CaseQRVerificationRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    booking = await booking_service.mark_return_case_verified(booking_id, body.qr_payload, current_user, db)
     return await booking_service.get_booking_detail(booking.id, current_user, db)
 
 

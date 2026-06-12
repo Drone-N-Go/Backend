@@ -20,6 +20,7 @@ from app.models import (  # noqa: F401
     admin_audit_event,
     admin_profile,
     booking,
+    case_qr_token,
     damage_report,
     drone,
     drone_favorite,

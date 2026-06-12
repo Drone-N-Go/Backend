@@ -30,6 +30,7 @@ from app.schemas.booking import (
     BookingResponse,
     PasscodeResponse,
 )
+from app.services.case_qr_service import assert_active_case_qr_matches_booking
 from app.services.drone_service import _drone_response
 
 logger = logging.getLogger(__name__)
@@ -424,10 +425,11 @@ async def mark_locker_opened(
 
 
 async def mark_case_verified(
-    booking_id: str, current_user: User, db: AsyncSession
+    booking_id: str, qr_payload: str, current_user: User, db: AsyncSession
 ) -> Booking:
     booking = await _get_booking_or_404(booking_id, db)
     _assert_current_user_booking(booking, current_user)
+    await assert_active_case_qr_matches_booking(booking, qr_payload, db)
     return await _advance_and_flush(booking, "case_verified", db)
 
 
@@ -458,6 +460,15 @@ async def start_return(
 ) -> Booking:
     booking = await _get_booking_or_404(booking_id, db)
     _assert_current_user_booking(booking, current_user)
+    return await _advance_and_flush(booking, "return_started", db)
+
+
+async def mark_return_case_verified(
+    booking_id: str, qr_payload: str, current_user: User, db: AsyncSession
+) -> Booking:
+    booking = await _get_booking_or_404(booking_id, db)
+    _assert_current_user_booking(booking, current_user)
+    await assert_active_case_qr_matches_booking(booking, qr_payload, db)
     return await _advance_and_flush(booking, "return_started", db)
 
 

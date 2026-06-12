@@ -4,6 +4,7 @@ app/services/admin_service.py
 Business logic for the admin backend.
 """
 
+import hmac
 import logging
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -28,6 +29,7 @@ from app.core.security import hash_password
 from app.models.admin_audit_event import AdminAuditEvent
 from app.models.admin_profile import AdminLocationAssignment, AdminProfile
 from app.models.booking import Booking
+from app.models.case_qr_token import CaseQRToken
 from app.models.drone import Drone
 from app.models.locker_access_event import LockerAccessEvent
 from app.models.locker_location import LockerLocation
@@ -37,10 +39,14 @@ from app.models.smiota_event import SmiotaEvent
 from app.models.user import User
 from app.schemas.admin import (
     AdminBookingSummary,
+    AdminDroneLookupResponse,
+    AdminDroneSearchResponse,
     AdminDroneSummary,
     AdminProfileListResponse,
     AdminProfileResponse,
     AdminStatsResponse,
+    CaseQRTokenLookupResponse,
+    CaseQRTokenResponse,
     LockerCurrentStateListResponse,
     LockerCurrentStateResponse,
     LockerDroneAssignmentRequest,
@@ -57,8 +63,17 @@ from app.schemas.admin import (
     SmiotaEventSummary,
     StaffCreateRequest,
 )
+from app.schemas.drone import DroneCreateRequest
 from app.schemas.user import UserResponse
 from app.services import auth_service
+from app.services.case_qr_service import (
+    case_qr_payload_for_token,
+    create_pending_case_qr_token,
+    extract_case_qr_token,
+    find_case_qr_token_by_payload,
+    hash_case_qr_token,
+    retire_case_qr_token,
+)
 
 ACTIVE_TASK_STATUSES = {"open", "in_progress"}
 TERMINAL_BOOKING_STATUSES = {"returned", "cancelled"}
@@ -495,7 +510,57 @@ def _drone_summary(drone: Drone | None) -> AdminDroneSummary | None:
         model_name=drone.model_name,
         serial_number=drone.serial_number,
         status=drone.status,
+        image_urls=drone.image_urls or [],
     )
+
+
+def _drone_lookup_response(drone: Drone) -> AdminDroneLookupResponse:
+    return AdminDroneLookupResponse(
+        id=drone.id,
+        model_name=drone.model_name,
+        serial_number=drone.serial_number,
+        status=drone.status,
+        image_urls=drone.image_urls or [],
+    )
+
+
+def _case_qr_response(token: CaseQRToken, drone: Drone) -> CaseQRTokenResponse:
+    return CaseQRTokenResponse(
+        token_id=token.id,
+        drone_id=token.drone_id,
+        status=token.status,
+        qr_payload=case_qr_payload_for_token(token),
+        label_title="DroneNGo Case Verification",
+        label_subtitle=f"{drone.model_name} · {drone.serial_number}",
+        drone=_drone_summary(drone),
+    )
+
+
+async def _get_admin_drone(drone_id: str, db: AsyncSession) -> Drone:
+    result = await db.execute(select(Drone).where(Drone.id == drone_id))
+    drone = result.scalar_one_or_none()
+    if not drone:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Drone not found.")
+    return drone
+
+
+async def _get_case_qr_token(token_id: str, db: AsyncSession) -> CaseQRToken:
+    result = await db.execute(select(CaseQRToken).where(CaseQRToken.id == token_id))
+    token = result.scalar_one_or_none()
+    if not token:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case QR token not found.")
+    return token
+
+
+async def _assert_drone_has_active_case_qr(drone_id: str, db: AsyncSession) -> None:
+    result = await db.execute(
+        select(CaseQRToken).where(CaseQRToken.drone_id == drone_id, CaseQRToken.status == "active")
+    )
+    if not result.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Drone must have a confirmed active case QR before locker assignment.",
+        )
 
 
 def _booking_summary(booking: Booking | None) -> AdminBookingSummary | None:
@@ -667,6 +732,8 @@ async def assign_locker_drone(
         drone = result.scalar_one_or_none()
         if not drone:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Drone not found.")
+        if body.require_active_case_qr:
+            await _assert_drone_has_active_case_qr(drone.id, db)
         drone.assigned_locker_location_id = unit.location_id
         db.add(drone)
         unit.current_drone_id = drone.id
@@ -860,6 +927,176 @@ async def get_stats(context: AdminContext, db: AsyncSession) -> AdminStatsRespon
     )
 
 
+async def create_admin_drone(
+    context: AdminContext, body: DroneCreateRequest, db: AsyncSession
+) -> AdminDroneLookupResponse:
+    from app.services.drone_service import create_drone as _create_drone
+
+    drone = await _create_drone(body, db)
+    await _audit(
+        db,
+        context,
+        "admin.drone_create",
+        "drone",
+        drone.id,
+        {"serial_number": drone.serial_number, "model_name": drone.model_name},
+    )
+    return _drone_lookup_response(drone)
+
+
+async def search_admin_drones(
+    context: AdminContext,
+    db: AsyncSession,
+    *,
+    q: str | None = None,
+    serial_number: str | None = None,
+    skip: int = 0,
+    limit: int = 50,
+) -> AdminDroneSearchResponse:
+    query = select(Drone)
+    count_query = select(func.count()).select_from(Drone)
+
+    filters = []
+    if serial_number:
+        filters.append(Drone.serial_number == serial_number)
+    if q:
+        pattern = f"%{q}%"
+        filters.append(or_(Drone.model_name.ilike(pattern), Drone.serial_number.ilike(pattern)))
+    if filters:
+        query = query.where(and_(*filters))
+        count_query = count_query.where(and_(*filters))
+
+    total = (await db.execute(count_query)).scalar_one()
+    result = await db.execute(query.order_by(Drone.created_at.desc()).offset(skip).limit(limit))
+    return AdminDroneSearchResponse(
+        items=[_drone_lookup_response(drone) for drone in result.scalars().all()],
+        total=total,
+    )
+
+
+async def generate_case_qr_token(
+    context: AdminContext, drone_id: str, reason: str, db: AsyncSession
+) -> CaseQRTokenResponse:
+    drone = await _get_admin_drone(drone_id, db)
+
+    existing_pending = await db.execute(
+        select(CaseQRToken).where(
+            CaseQRToken.drone_id == drone.id,
+            CaseQRToken.status == "pending_printed",
+        )
+    )
+    pending = existing_pending.scalar_one_or_none()
+    if pending:
+        return _case_qr_response(pending, drone)
+
+    existing_active = await db.execute(
+        select(CaseQRToken).where(CaseQRToken.drone_id == drone.id, CaseQRToken.status == "active")
+    )
+    if existing_active.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Drone already has an active case QR. Use void-and-regenerate to replace it.",
+        )
+
+    token = await create_pending_case_qr_token(drone, db, admin_profile_id=context.profile.id)
+    await _audit(
+        db,
+        context,
+        "admin.case_qr_generate",
+        "case_qr_token",
+        token.id,
+        {"drone_id": drone.id, "reason": reason},
+    )
+    return _case_qr_response(token, drone)
+
+
+async def get_case_qr_print_payload(
+    context: AdminContext, token_id: str, db: AsyncSession
+) -> CaseQRTokenResponse:
+    token = await _get_case_qr_token(token_id, db)
+    if token.status not in {"pending_printed", "active"}:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Case QR token is no longer printable.")
+    drone = await _get_admin_drone(token.drone_id, db)
+    return _case_qr_response(token, drone)
+
+
+async def void_and_regenerate_case_qr_token(
+    context: AdminContext, token_id: str, reason: str, db: AsyncSession
+) -> CaseQRTokenResponse:
+    token = await _get_case_qr_token(token_id, db)
+    if token.status in {"voided", "rotated"}:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Case QR token is already inactive.")
+
+    drone = await _get_admin_drone(token.drone_id, db)
+    retire_case_qr_token(token, reason=reason)
+    db.add(token)
+    replacement = await create_pending_case_qr_token(drone, db, admin_profile_id=context.profile.id)
+    await _audit(
+        db,
+        context,
+        "admin.case_qr_void_and_regenerate",
+        "case_qr_token",
+        token.id,
+        {"replacement_token_id": replacement.id, "drone_id": drone.id, "reason": reason},
+    )
+    return _case_qr_response(replacement, drone)
+
+
+async def confirm_case_qr_token(
+    context: AdminContext, token_id: str, qr_payload: str, db: AsyncSession
+) -> CaseQRTokenResponse:
+    token = await _get_case_qr_token(token_id, db)
+    if token.status in {"voided", "rotated"}:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Case QR token is inactive.")
+
+    scanned_hash = hash_case_qr_token(extract_case_qr_token(qr_payload))
+    if not hmac.compare_digest(scanned_hash, token.token_hash):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Scanned QR does not match this token.")
+
+    drone = await _get_admin_drone(token.drone_id, db)
+    now = datetime.now(timezone.utc)
+    if token.status == "pending_printed":
+        active_result = await db.execute(
+            select(CaseQRToken).where(
+                CaseQRToken.drone_id == token.drone_id,
+                CaseQRToken.status == "active",
+                CaseQRToken.id != token.id,
+            )
+        )
+        for active_token in active_result.scalars().all():
+            retire_case_qr_token(active_token, reason="Replaced by confirmed printed QR.")
+            db.add(active_token)
+        token.status = "active"
+    token.confirmed_by_admin_profile_id = context.profile.id
+    token.confirmed_at = now
+    db.add(token)
+    await db.flush()
+    await _audit(
+        db,
+        context,
+        "admin.case_qr_confirm",
+        "case_qr_token",
+        token.id,
+        {"drone_id": drone.id},
+    )
+    return _case_qr_response(token, drone)
+
+
+async def lookup_case_qr_token(
+    context: AdminContext, qr_payload: str, db: AsyncSession
+) -> CaseQRTokenLookupResponse:
+    token = await find_case_qr_token_by_payload(qr_payload, db)
+    if not token:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case QR token not found.")
+    drone = await _get_admin_drone(token.drone_id, db)
+    return CaseQRTokenLookupResponse(
+        token_id=token.id,
+        drone_id=token.drone_id,
+        status=token.status,
+        drone=_drone_summary(drone),
+    )
+
+
 async def create_admin_location(
     context: AdminContext, body: "AdminLocationCreateRequest", db: AsyncSession
 ) -> "LocationResponse":
@@ -907,14 +1144,7 @@ async def lookup_drone_by_serial(
     drone = result.scalar_one_or_none()
     if not drone:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No drone found with that serial number.")
-    from app.schemas.admin import AdminDroneLookupResponse
-    return AdminDroneLookupResponse(
-        id=drone.id,
-        model_name=drone.model_name,
-        serial_number=drone.serial_number,
-        status=drone.status,
-        image_urls=drone.image_urls or [],
-    )
+    return _drone_lookup_response(drone)
 
 
 async def intake_drone(
@@ -931,10 +1161,20 @@ async def intake_drone(
             detail="This locker unit already has a drone assigned.",
         )
 
-    result = await db.execute(select(Drone).where(Drone.serial_number == body.serial_number))
+    if body.drone_id:
+        result = await db.execute(select(Drone).where(Drone.id == body.drone_id))
+    elif body.serial_number:
+        result = await db.execute(select(Drone).where(Drone.serial_number == body.serial_number))
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Either drone_id or serial_number is required.",
+        )
     drone = result.scalar_one_or_none()
     if not drone:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No drone found with that serial number.")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Drone not found.")
+    if body.require_active_case_qr:
+        await _assert_drone_has_active_case_qr(drone.id, db)
 
     # Upload condition photos to S3
     photo_urls: list[str] = []
@@ -979,6 +1219,41 @@ async def intake_drone(
     )
 
 
+async def remove_drone_from_unit(
+    context: AdminContext, locker_unit_id: str, db: AsyncSession
+) -> "LockerCurrentStateResponse":
+    from app.schemas.admin import LockerCurrentStateResponse  # noqa: F811
+
+    unit = await _get_unit_for_admin(context, locker_unit_id, db)
+    if not unit.current_drone_id:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This locker unit has no drone assigned.",
+        )
+
+    drone = unit.current_drone
+    # Return drone to maintenance status and detach from location
+    drone.status = "maintenance"
+    drone.assigned_locker_location_id = None
+    db.add(drone)
+
+    unit.current_drone_id = None
+    unit.status = "available"
+    db.add(unit)
+    await db.flush()
+
+    await _audit(
+        db,
+        context,
+        "admin.drone_removed_from_locker",
+        "locker_unit",
+        unit.id,
+        {"drone_id": drone.id, "serial_number": drone.serial_number},
+    )
+
+    return await _locker_state(unit, db)
+
+
 async def list_unmapped_smiota_events(context: AdminContext, db: AsyncSession, limit: int = 50) -> list[SmiotaEventSummary]:
     if not has_global_location_scope(context.profile.role):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Global admin scope required.")
@@ -993,6 +1268,18 @@ async def list_unmapped_smiota_events(context: AdminContext, db: AsyncSession, l
             )
         )
         .order_by(SmiotaEvent.created_at.desc())
+        .limit(limit)
+    )
+    return [_event_summary(event) for event in result.scalars().all()]
+
+
+async def list_smiota_events(context: AdminContext, db: AsyncSession, limit: int = 100, skip: int = 0) -> list[SmiotaEventSummary]:
+    if not has_global_location_scope(context.profile.role):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Global admin scope required.")
+    result = await db.execute(
+        select(SmiotaEvent)
+        .order_by(SmiotaEvent.created_at.desc())
+        .offset(skip)
         .limit(limit)
     )
     return [_event_summary(event) for event in result.scalars().all()]

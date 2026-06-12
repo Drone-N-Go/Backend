@@ -28,6 +28,7 @@ from app.models.drone_favorite import DroneFavorite     # noqa: F401, E402
 from app.models.locker_location import LockerLocation   # noqa: F401, E402
 from app.models.locker_unit import LockerUnit           # noqa: F401, E402
 from app.models.booking import Booking                  # noqa: F401, E402
+from app.models.case_qr_token import CaseQRToken        # noqa: F401, E402
 from app.models.damage_report import DamageReport       # noqa: F401, E402
 from app.models.smiota_event import SmiotaEvent         # noqa: F401, E402
 from app.models.login_attempt import LoginAttempt       # noqa: F401, E402
