@@ -103,6 +103,7 @@ class AdminRoleUpdateServiceTests(IsolatedAsyncioTestCase):
 
         with (
             patch.object(admin_service, "_get_admin_profile", new=AsyncMock(return_value=target)) as get_profile,
+            patch.object(admin_service, "_assigned_location_ids", new=AsyncMock(return_value=[])) as assigned_locations,
             patch.object(admin_service, "_audit", new=AsyncMock()) as audit,
         ):
             response = await admin_service.update_staff_role(
@@ -112,7 +113,9 @@ class AdminRoleUpdateServiceTests(IsolatedAsyncioTestCase):
                 db,
             )
 
-        get_profile.assert_awaited_once_with("target-profile", db)
+        self.assertEqual(get_profile.await_count, 2)
+        get_profile.assert_awaited_with("target-profile", db)
+        assigned_locations.assert_awaited_once_with("target-profile", db)
         db.add.assert_called_once_with(target)
         db.flush.assert_awaited_once()
         audit.assert_awaited_once()

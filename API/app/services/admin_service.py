@@ -149,6 +149,7 @@ async def _get_admin_profile(profile_id: str, db: AsyncSession) -> AdminProfile:
         select(AdminProfile)
         .where(AdminProfile.id == profile_id)
         .options(selectinload(AdminProfile.user), selectinload(AdminProfile.location_assignments))
+        .execution_options(populate_existing=True)
     )
     profile = result.scalar_one_or_none()
     if not profile:
@@ -389,7 +390,15 @@ async def update_staff_role(
             {"old_role": old_role, "new_role": new_role},
         )
         _admin_debug("update_staff_role_audit_success", target_profile_id=target.id)
-        response = _profile_response(target, [a.location_id for a in target.location_assignments])
+        target = await _get_admin_profile(profile_id, db)
+        assigned_location_ids = await _assigned_location_ids(target.id, db)
+        _admin_debug(
+            "update_staff_role_response_reload_success",
+            target_profile_id=target.id,
+            target_role=target.role,
+            assigned_location_ids=assigned_location_ids,
+        )
+        response = _profile_response(target, assigned_location_ids)
         _admin_debug(
             "update_staff_role_response_ready",
             target_profile_id=response.id,
