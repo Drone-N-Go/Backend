@@ -4,7 +4,7 @@ services:
     runtime: python
     rootDir: API
     buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    startCommand: bash scripts/start.sh
     healthCheckPath: /health
     envVars:
       - key: APP_ENV
