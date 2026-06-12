@@ -4,6 +4,7 @@ app/services/admin_service.py
 Business logic for the admin backend.
 """
 
+import logging
 from datetime import datetime, timezone
 from decimal import Decimal
 
@@ -60,6 +61,7 @@ from app.services import auth_service
 
 ACTIVE_TASK_STATUSES = {"open", "in_progress"}
 TERMINAL_BOOKING_STATUSES = {"returned", "cancelled"}
+logger = logging.getLogger(__name__)
 
 
 def _profile_response(profile: AdminProfile, assigned_location_ids: list[str] | None = None) -> AdminProfileResponse:
@@ -308,14 +310,47 @@ async def set_staff_status(
 async def update_staff_role(
     context: AdminContext, profile_id: str, new_role: str, db: AsyncSession
 ) -> AdminProfileResponse:
+    logger.info(
+        "ADMIN_TRACE update_staff_role service start actor_profile_id=%s actor_role=%s "
+        "target_profile_id=%s requested_role=%s",
+        context.profile.id,
+        context.profile.role,
+        profile_id,
+        new_role,
+    )
     target = await _get_admin_profile(profile_id, db)
+    logger.info(
+        "ADMIN_TRACE update_staff_role target_loaded actor_profile_id=%s target_profile_id=%s "
+        "target_current_role=%s",
+        context.profile.id,
+        target.id,
+        target.role,
+    )
     # Actor must be able to manage both the target's current role and the new role.
+    logger.info(
+        "ADMIN_TRACE update_staff_role permission_check_current actor_role=%s target_current_role=%s",
+        context.profile.role,
+        target.role,
+    )
     _assert_can_manage_role(context.profile.role, target.role)
+    logger.info(
+        "ADMIN_TRACE update_staff_role permission_check_new actor_role=%s requested_role=%s",
+        context.profile.role,
+        new_role,
+    )
     _assert_can_manage_role(context.profile.role, new_role)
     old_role = target.role
     target.role = new_role
     db.add(target)
+    logger.info(
+        "ADMIN_TRACE update_staff_role flush_start target_profile_id=%s old_role=%s new_role=%s",
+        target.id,
+        old_role,
+        new_role,
+    )
     await db.flush()
+    logger.info("ADMIN_TRACE update_staff_role flush_success target_profile_id=%s", target.id)
+    logger.info("ADMIN_TRACE update_staff_role audit_start target_profile_id=%s", target.id)
     await _audit(
         db,
         context,
@@ -324,7 +359,14 @@ async def update_staff_role(
         target.id,
         {"old_role": old_role, "new_role": new_role},
     )
-    return _profile_response(target, [a.location_id for a in target.location_assignments])
+    logger.info("ADMIN_TRACE update_staff_role audit_success target_profile_id=%s", target.id)
+    response = _profile_response(target, [a.location_id for a in target.location_assignments])
+    logger.info(
+        "ADMIN_TRACE update_staff_role service success target_profile_id=%s role=%s",
+        response.id,
+        response.role,
+    )
+    return response
 
 
 async def _latest_smiota_event_for_unit(unit: LockerUnit, db: AsyncSession) -> SmiotaEvent | None:

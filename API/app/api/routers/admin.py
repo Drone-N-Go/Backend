@@ -142,7 +142,33 @@ async def update_staff_role(
     db: AsyncSession = Depends(get_db),
     context: AdminContext = Depends(require_capability(MANAGE_STAFF)),
 ):
-    return await admin_service.update_staff_role(context, profile_id, body.role, db)
+    logger.info(
+        "ADMIN_TRACE update_staff_role route start actor_profile_id=%s actor_role=%s "
+        "target_profile_id=%s requested_role=%s",
+        context.profile.id,
+        context.profile.role,
+        profile_id,
+        body.role,
+    )
+    try:
+        response = await admin_service.update_staff_role(context, profile_id, body.role, db)
+        logger.info(
+            "ADMIN_TRACE update_staff_role route success actor_profile_id=%s target_profile_id=%s role=%s",
+            context.profile.id,
+            response.id,
+            response.role,
+        )
+        return response
+    except Exception:
+        logger.exception(
+            "ADMIN_TRACE update_staff_role route failed actor_profile_id=%s actor_role=%s "
+            "target_profile_id=%s requested_role=%s",
+            context.profile.id,
+            context.profile.role,
+            profile_id,
+            body.role,
+        )
+        raise
 
 
 @router.get(

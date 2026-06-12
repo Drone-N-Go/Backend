@@ -60,3 +60,16 @@ After deploy:
 - `POST /api/auth/login`
 
 If startup fails, check Render logs first. Production safety validation intentionally fails fast for missing core env vars, placeholder secrets, or short `SECRET_KEY` values.
+
+### Admin Role Update Diagnostics
+
+If `PATCH /api/admin/staff/{profile_id}/role` returns `500` only in production, first check Render logs for `ADMIN_TRACE update_staff_role`. Then verify Supabase has the expected admin role constraint:
+
+```sql
+select conname, pg_get_constraintdef(oid)
+from pg_constraint
+where conrelid = 'admin_profiles'::regclass
+  and conname = 'ck_admin_profiles_role';
+```
+
+Expected roles: `owner`, `master_developer`, `manager`, `developer`, and `admin`.

@@ -52,6 +52,7 @@ class AdminSurfaceTests(TestCase):
 
         self.assertIn(("POST", "/api/admin/setup/owner"), route_methods)
         self.assertIn(("GET", "/api/admin/me"), route_methods)
+        self.assertIn(("PATCH", "/api/admin/staff/{profile_id}/role"), route_methods)
         self.assertIn(("GET", "/api/admin/lockers/current-state"), route_methods)
         self.assertIn(("POST", "/api/admin/lockers/{locker_unit_id}/reveal-passcode"), route_methods)
         self.assertIn(("PATCH", "/api/admin/lockers/{locker_unit_id}/mapping"), route_methods)

@@ -1,4 +1,13 @@
-from unittest import TestCase
+import os
+from datetime import datetime, timezone
+from unittest import IsolatedAsyncioTestCase, TestCase
+from unittest.mock import AsyncMock, Mock, patch
+
+from fastapi import HTTPException
+
+os.environ.setdefault("APP_ENV", "test")
+os.environ.setdefault("DATABASE_URL", "postgresql://user:pass@localhost:5432/dronengo_test")
+os.environ.setdefault("SECRET_KEY", "x" * 64)
 
 from app.core.admin_permissions import (
     DEVELOPER,
@@ -12,6 +21,9 @@ from app.core.admin_permissions import (
     can_manage_target_role,
     role_has_capability,
 )
+from app.core.dependencies import AdminContext
+from app.models.admin_profile import AdminProfile
+from app.services import admin_service
 
 
 class AdminPermissionTests(TestCase):
@@ -36,3 +48,74 @@ class AdminPermissionTests(TestCase):
     def test_admin_has_locker_state_but_not_money(self):
         self.assertTrue(role_has_capability(ADMIN, VIEW_LOCKER_STATE))
         self.assertFalse(role_has_capability(ADMIN, VIEW_MONEY))
+
+
+class AdminRoleUpdateServiceTests(IsolatedAsyncioTestCase):
+    def _profile(self, profile_id: str, role: str) -> AdminProfile:
+        now = datetime.now(timezone.utc)
+        return AdminProfile(
+            id=profile_id,
+            user_id=f"user-{profile_id}",
+            role=role,
+            status="active",
+            title=None,
+            phone=None,
+            notes=None,
+            created_at=now,
+            updated_at=now,
+        )
+
+    async def test_owner_can_change_owner_to_master_developer(self):
+        actor = self._profile("actor-profile", OWNER)
+        target = self._profile("target-profile", OWNER)
+        db = Mock()
+        db.flush = AsyncMock()
+        context = AdminContext(
+            user=Mock(id="actor-user"),
+            profile=actor,
+            capabilities=set(),
+            assigned_location_ids=set(),
+        )
+
+        with (
+            patch.object(admin_service, "_get_admin_profile", new=AsyncMock(return_value=target)) as get_profile,
+            patch.object(admin_service, "_audit", new=AsyncMock()) as audit,
+        ):
+            response = await admin_service.update_staff_role(
+                context,
+                "target-profile",
+                MASTER_DEVELOPER,
+                db,
+            )
+
+        get_profile.assert_awaited_once_with("target-profile", db)
+        db.add.assert_called_once_with(target)
+        db.flush.assert_awaited_once()
+        audit.assert_awaited_once()
+        self.assertEqual(target.role, MASTER_DEVELOPER)
+        self.assertEqual(response.role, MASTER_DEVELOPER)
+
+    async def test_manager_cannot_assign_master_developer(self):
+        actor = self._profile("actor-profile", MANAGER)
+        target = self._profile("target-profile", ADMIN)
+        db = Mock()
+        db.flush = AsyncMock()
+        context = AdminContext(
+            user=Mock(id="actor-user"),
+            profile=actor,
+            capabilities=set(),
+            assigned_location_ids=set(),
+        )
+
+        with patch.object(admin_service, "_get_admin_profile", new=AsyncMock(return_value=target)):
+            with self.assertRaises(HTTPException) as raised:
+                await admin_service.update_staff_role(
+                    context,
+                    "target-profile",
+                    MASTER_DEVELOPER,
+                    db,
+                )
+
+        self.assertEqual(raised.exception.status_code, 403)
+        db.add.assert_not_called()
+        db.flush.assert_not_awaited()
