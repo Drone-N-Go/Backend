@@ -120,6 +120,7 @@ class AdminBookingSummary(BaseModel):
 
 
 class LockerCurrentStateResponse(BaseModel):
+    id: str
     locker_unit_id: str
     location_id: str
     location_name: str

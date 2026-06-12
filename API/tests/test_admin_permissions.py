@@ -23,6 +23,7 @@ from app.core.admin_permissions import (
 )
 from app.core.dependencies import AdminContext
 from app.models.admin_profile import AdminProfile
+from app.schemas.admin import LockerCurrentStateResponse
 from app.services import admin_service
 
 
@@ -48,6 +49,29 @@ class AdminPermissionTests(TestCase):
     def test_admin_has_locker_state_but_not_money(self):
         self.assertTrue(role_has_capability(ADMIN, VIEW_LOCKER_STATE))
         self.assertFalse(role_has_capability(ADMIN, VIEW_MONEY))
+
+    def test_locker_current_state_keeps_ios_id_field(self):
+        response = LockerCurrentStateResponse(
+            id="locker-1",
+            locker_unit_id="locker-1",
+            location_id="location-1",
+            location_name="DNG Headquarters",
+            unit_number="A1",
+            status="available",
+            smiota_locker_name=None,
+            smiota_unit_identifier=None,
+            has_current_passcode=False,
+            passcode_mask=None,
+            latest_tracking_id=None,
+            latest_event=None,
+            assigned_drone=None,
+            active_booking=None,
+            maintenance_task_count=0,
+        )
+
+        payload = response.model_dump(mode="json")
+        self.assertEqual(payload["id"], "locker-1")
+        self.assertEqual(payload["locker_unit_id"], "locker-1")
 
 
 class AdminRoleUpdateServiceTests(IsolatedAsyncioTestCase):

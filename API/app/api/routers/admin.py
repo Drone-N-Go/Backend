@@ -49,6 +49,15 @@ router = APIRouter(prefix="/admin", tags=["Admin"])
 logger = logging.getLogger(__name__)
 
 
+def _admin_route_debug(message: str, **values) -> None:
+    rendered_values = " ".join(f"{key}={value!r}" for key, value in values.items())
+    line = f"ADMIN_DEBUG_ROUTE {message}"
+    if rendered_values:
+        line = f"{line} {rendered_values}"
+    logger.error(line)
+    print(line, flush=True)
+
+
 @router.post(
     "/setup/owner",
     response_model=OwnerSetupResponse,
@@ -142,32 +151,38 @@ async def update_staff_role(
     db: AsyncSession = Depends(get_db),
     context: AdminContext = Depends(require_capability(MANAGE_STAFF)),
 ):
-    logger.info(
-        "ADMIN_TRACE update_staff_role route start actor_profile_id=%s actor_role=%s "
-        "target_profile_id=%s requested_role=%s",
-        context.profile.id,
-        context.profile.role,
-        profile_id,
-        body.role,
+    _admin_route_debug(
+        "update_staff_role_start",
+        actor_profile_id=context.profile.id,
+        actor_user_id=context.user.id,
+        actor_role=context.profile.role,
+        actor_capabilities=sorted(context.capabilities),
+        target_profile_id=profile_id,
+        request_body=body.model_dump(mode="json"),
     )
     try:
         response = await admin_service.update_staff_role(context, profile_id, body.role, db)
-        logger.info(
-            "ADMIN_TRACE update_staff_role route success actor_profile_id=%s target_profile_id=%s role=%s",
-            context.profile.id,
-            response.id,
-            response.role,
+        payload = response.model_dump(mode="json")
+        _admin_route_debug(
+            "update_staff_role_success_before_fastapi_response",
+            actor_profile_id=context.profile.id,
+            target_profile_id=response.id,
+            response_payload=payload,
+            response_keys=sorted(payload.keys()),
         )
         return response
-    except Exception:
-        logger.exception(
-            "ADMIN_TRACE update_staff_role route failed actor_profile_id=%s actor_role=%s "
-            "target_profile_id=%s requested_role=%s",
-            context.profile.id,
-            context.profile.role,
-            profile_id,
-            body.role,
+    except Exception as exc:
+        _admin_route_debug(
+            "update_staff_role_failed",
+            actor_profile_id=context.profile.id,
+            actor_user_id=context.user.id,
+            actor_role=context.profile.role,
+            target_profile_id=profile_id,
+            request_body=body.model_dump(mode="json"),
+            exc_type=type(exc).__name__,
+            exc=str(exc),
         )
+        logger.exception("ADMIN_DEBUG_ROUTE update_staff_role_failed_traceback")
         raise
 
 
@@ -183,9 +198,40 @@ async def locker_current_state(
     db: AsyncSession = Depends(get_db),
     context: AdminContext = Depends(require_capability(VIEW_LOCKER_STATE)),
 ):
-    return await admin_service.list_locker_current_state(
-        context, db, location_id=location_id, skip=skip, limit=limit
+    _admin_route_debug(
+        "locker_current_state_start",
+        actor_profile_id=context.profile.id,
+        actor_user_id=context.user.id,
+        actor_role=context.profile.role,
+        location_id=location_id,
+        skip=skip,
+        limit=limit,
     )
+    try:
+        response = await admin_service.list_locker_current_state(
+            context, db, location_id=location_id, skip=skip, limit=limit
+        )
+        first_item = response.items[0].model_dump(mode="json") if response.items else None
+        _admin_route_debug(
+            "locker_current_state_success_before_fastapi_response",
+            actor_profile_id=context.profile.id,
+            total=response.total,
+            item_count=len(response.items),
+            first_item=first_item,
+        )
+        return response
+    except Exception as exc:
+        _admin_route_debug(
+            "locker_current_state_failed",
+            actor_profile_id=context.profile.id,
+            actor_user_id=context.user.id,
+            actor_role=context.profile.role,
+            location_id=location_id,
+            exc_type=type(exc).__name__,
+            exc=str(exc),
+        )
+        logger.exception("ADMIN_DEBUG_ROUTE locker_current_state_failed_traceback")
+        raise
 
 
 @router.post(

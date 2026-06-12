@@ -6,7 +6,9 @@ Drone N' Go API — FastAPI application entrypoint.
 
 import logging
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError, ResponseValidationError
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routers import admin, auth, bookings, drones, locations, users, webhooks
@@ -36,6 +38,24 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 settings = get_settings()
+
+
+def _debug_log_exception(prefix: str, request: Request, exc: Exception) -> None:
+    logger.error(
+        "%s method=%s path=%s query=%s exc_type=%s exc=%r",
+        prefix,
+        request.method,
+        request.url.path,
+        str(request.url.query),
+        type(exc).__name__,
+        exc,
+    )
+    print(
+        f"{prefix} method={request.method} path={request.url.path} "
+        f"query={request.url.query!r} exc_type={type(exc).__name__} exc={exc!r}",
+        flush=True,
+    )
+    logger.exception("%s traceback", prefix)
 
 
 app = FastAPI(
@@ -68,6 +88,24 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.exception_handler(ResponseValidationError)
+async def response_validation_exception_handler(request: Request, exc: ResponseValidationError):
+    _debug_log_exception("ADMIN_DEBUG_RESPONSE_VALIDATION_ERROR", request, exc)
+    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+
+
+@app.exception_handler(RequestValidationError)
+async def request_validation_exception_handler(request: Request, exc: RequestValidationError):
+    _debug_log_exception("ADMIN_DEBUG_REQUEST_VALIDATION_ERROR", request, exc)
+    return JSONResponse(status_code=422, content={"detail": exc.errors()})
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    _debug_log_exception("ADMIN_DEBUG_UNHANDLED_EXCEPTION", request, exc)
+    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
 API_PREFIX = "/api"
 app.include_router(auth.router,      prefix=API_PREFIX)

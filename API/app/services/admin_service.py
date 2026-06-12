@@ -10,6 +10,7 @@ from decimal import Decimal
 
 from fastapi import HTTPException, status
 from sqlalchemy import and_, func, or_, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -62,6 +63,15 @@ from app.services import auth_service
 ACTIVE_TASK_STATUSES = {"open", "in_progress"}
 TERMINAL_BOOKING_STATUSES = {"returned", "cancelled"}
 logger = logging.getLogger(__name__)
+
+
+def _admin_debug(message: str, **values) -> None:
+    rendered_values = " ".join(f"{key}={value!r}" for key, value in values.items())
+    line = f"ADMIN_DEBUG {message}"
+    if rendered_values:
+        line = f"{line} {rendered_values}"
+    logger.error(line)
+    print(line, flush=True)
 
 
 def _profile_response(profile: AdminProfile, assigned_location_ids: list[str] | None = None) -> AdminProfileResponse:
@@ -122,6 +132,11 @@ def _assert_location_scope(context: AdminContext, location_id: str) -> None:
 
 def _assert_can_manage_role(actor_role: str, target_role: str) -> None:
     if not can_manage_target_role(actor_role, target_role):
+        _admin_debug(
+            "role_permission_denied",
+            actor_role=actor_role,
+            target_role=target_role,
+        )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="This admin role cannot manage the target role.",
@@ -129,6 +144,7 @@ def _assert_can_manage_role(actor_role: str, target_role: str) -> None:
 
 
 async def _get_admin_profile(profile_id: str, db: AsyncSession) -> AdminProfile:
+    _admin_debug("load_admin_profile_start", profile_id=profile_id)
     result = await db.execute(
         select(AdminProfile)
         .where(AdminProfile.id == profile_id)
@@ -136,7 +152,16 @@ async def _get_admin_profile(profile_id: str, db: AsyncSession) -> AdminProfile:
     )
     profile = result.scalar_one_or_none()
     if not profile:
+        _admin_debug("load_admin_profile_not_found", profile_id=profile_id)
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Admin profile not found.")
+    _admin_debug(
+        "load_admin_profile_success",
+        profile_id=profile.id,
+        user_id=profile.user_id,
+        role=profile.role,
+        status=profile.status,
+        assignment_count=len(profile.location_assignments),
+    )
     return profile
 
 
@@ -310,63 +335,90 @@ async def set_staff_status(
 async def update_staff_role(
     context: AdminContext, profile_id: str, new_role: str, db: AsyncSession
 ) -> AdminProfileResponse:
-    logger.info(
-        "ADMIN_TRACE update_staff_role service start actor_profile_id=%s actor_role=%s "
-        "target_profile_id=%s requested_role=%s",
-        context.profile.id,
-        context.profile.role,
-        profile_id,
-        new_role,
+    _admin_debug(
+        "update_staff_role_service_start",
+        actor_profile_id=context.profile.id,
+        actor_user_id=context.user.id,
+        actor_role=context.profile.role,
+        actor_capabilities=sorted(context.capabilities),
+        actor_assigned_locations=sorted(context.assigned_location_ids),
+        target_profile_id=profile_id,
+        requested_role=new_role,
     )
-    target = await _get_admin_profile(profile_id, db)
-    logger.info(
-        "ADMIN_TRACE update_staff_role target_loaded actor_profile_id=%s target_profile_id=%s "
-        "target_current_role=%s",
-        context.profile.id,
-        target.id,
-        target.role,
-    )
-    # Actor must be able to manage both the target's current role and the new role.
-    logger.info(
-        "ADMIN_TRACE update_staff_role permission_check_current actor_role=%s target_current_role=%s",
-        context.profile.role,
-        target.role,
-    )
-    _assert_can_manage_role(context.profile.role, target.role)
-    logger.info(
-        "ADMIN_TRACE update_staff_role permission_check_new actor_role=%s requested_role=%s",
-        context.profile.role,
-        new_role,
-    )
-    _assert_can_manage_role(context.profile.role, new_role)
-    old_role = target.role
-    target.role = new_role
-    db.add(target)
-    logger.info(
-        "ADMIN_TRACE update_staff_role flush_start target_profile_id=%s old_role=%s new_role=%s",
-        target.id,
-        old_role,
-        new_role,
-    )
-    await db.flush()
-    logger.info("ADMIN_TRACE update_staff_role flush_success target_profile_id=%s", target.id)
-    logger.info("ADMIN_TRACE update_staff_role audit_start target_profile_id=%s", target.id)
-    await _audit(
-        db,
-        context,
-        "admin.staff_role_updated",
-        "admin_profile",
-        target.id,
-        {"old_role": old_role, "new_role": new_role},
-    )
-    logger.info("ADMIN_TRACE update_staff_role audit_success target_profile_id=%s", target.id)
-    response = _profile_response(target, [a.location_id for a in target.location_assignments])
-    logger.info(
-        "ADMIN_TRACE update_staff_role service success target_profile_id=%s role=%s",
-        response.id,
-        response.role,
-    )
-    return response
+    try:
+        target = await _get_admin_profile(profile_id, db)
+        _admin_debug(
+            "update_staff_role_target_loaded",
+            actor_profile_id=context.profile.id,
+            target_profile_id=target.id,
+            target_user_id=target.user_id,
+            target_current_role=target.role,
+            target_status=target.status,
+            target_email=target.user.email if target.user else None,
+        )
+        _admin_debug(
+            "update_staff_role_permission_check_current",
+            actor_role=context.profile.role,
+            target_current_role=target.role,
+        )
+        _assert_can_manage_role(context.profile.role, target.role)
+        _admin_debug(
+            "update_staff_role_permission_check_new",
+            actor_role=context.profile.role,
+            requested_role=new_role,
+        )
+        _assert_can_manage_role(context.profile.role, new_role)
+        old_role = target.role
+        target.role = new_role
+        db.add(target)
+        _admin_debug(
+            "update_staff_role_flush_start",
+            target_profile_id=target.id,
+            old_role=old_role,
+            new_role=new_role,
+        )
+        await db.flush()
+        _admin_debug("update_staff_role_flush_success", target_profile_id=target.id)
+        _admin_debug("update_staff_role_audit_start", target_profile_id=target.id)
+        await _audit(
+            db,
+            context,
+            "admin.staff_role_updated",
+            "admin_profile",
+            target.id,
+            {"old_role": old_role, "new_role": new_role},
+        )
+        _admin_debug("update_staff_role_audit_success", target_profile_id=target.id)
+        response = _profile_response(target, [a.location_id for a in target.location_assignments])
+        _admin_debug(
+            "update_staff_role_response_ready",
+            target_profile_id=response.id,
+            response_role=response.role,
+            response_user_id=response.user_id,
+            response_capabilities=response.capabilities,
+            response_assigned_location_ids=response.assigned_location_ids,
+        )
+        return response
+    except SQLAlchemyError as exc:
+        _admin_debug(
+            "update_staff_role_sqlalchemy_error",
+            actor_profile_id=context.profile.id,
+            target_profile_id=profile_id,
+            requested_role=new_role,
+            exc_type=type(exc).__name__,
+            exc=str(exc),
+        )
+        raise
+    except Exception as exc:
+        _admin_debug(
+            "update_staff_role_unhandled_error",
+            actor_profile_id=context.profile.id,
+            target_profile_id=profile_id,
+            requested_role=new_role,
+            exc_type=type(exc).__name__,
+            exc=str(exc),
+        )
+        raise
 
 
 async def _latest_smiota_event_for_unit(unit: LockerUnit, db: AsyncSession) -> SmiotaEvent | None:
@@ -449,12 +501,23 @@ def _booking_summary(booking: Booking | None) -> AdminBookingSummary | None:
 
 
 async def _locker_state(unit: LockerUnit, db: AsyncSession) -> LockerCurrentStateResponse:
+    _admin_debug(
+        "locker_state_build_start",
+        locker_unit_id=unit.id,
+        location_id=unit.location_id,
+        unit_number=unit.unit_number,
+        status=unit.status,
+        smiota_locker_name=unit.smiota_locker_name,
+        smiota_unit_identifier=unit.smiota_unit_identifier,
+        current_drone_id=unit.current_drone_id,
+    )
     event = await _latest_smiota_event_for_unit(unit, db)
     booking = await _active_booking_for_unit(unit, db)
     task_count = await _active_task_count(unit.id, db)
     passcode = event.passcode if event else None
 
-    return LockerCurrentStateResponse(
+    response = LockerCurrentStateResponse(
+        id=unit.id,
         locker_unit_id=unit.id,
         location_id=unit.location_id,
         location_name=unit.location.campus_name if unit.location else "",
@@ -470,6 +533,17 @@ async def _locker_state(unit: LockerUnit, db: AsyncSession) -> LockerCurrentStat
         active_booking=_booking_summary(booking),
         maintenance_task_count=task_count,
     )
+    _admin_debug(
+        "locker_state_build_success",
+        id=response.id,
+        locker_unit_id=response.locker_unit_id,
+        has_current_passcode=response.has_current_passcode,
+        latest_event_id=response.latest_event.id if response.latest_event else None,
+        assigned_drone_id=response.assigned_drone.id if response.assigned_drone else None,
+        active_booking_id=response.active_booking.id if response.active_booking else None,
+        response_keys=sorted(response.model_dump(mode="json").keys()),
+    )
+    return response
 
 
 async def list_locker_current_state(
@@ -479,6 +553,15 @@ async def list_locker_current_state(
     skip: int = 0,
     limit: int = 50,
 ) -> LockerCurrentStateListResponse:
+    _admin_debug(
+        "locker_current_state_start",
+        actor_profile_id=context.profile.id,
+        actor_role=context.profile.role,
+        location_id=location_id,
+        skip=skip,
+        limit=limit,
+        assigned_location_ids=sorted(context.assigned_location_ids),
+    )
     query = select(LockerUnit).options(
         selectinload(LockerUnit.location),
         selectinload(LockerUnit.current_drone),
@@ -499,12 +582,26 @@ async def list_locker_current_state(
     units = (
         await db.execute(query.order_by(LockerUnit.unit_number).offset(skip).limit(limit))
     ).scalars().all()
-    return LockerCurrentStateListResponse(
-        items=[await _locker_state(unit, db) for unit in units],
+    _admin_debug(
+        "locker_current_state_units_loaded",
+        total=total,
+        returned_units=len(units),
+        locker_unit_ids=[unit.id for unit in units],
+    )
+    items = [await _locker_state(unit, db) for unit in units]
+    response = LockerCurrentStateListResponse(
+        items=items,
         total=total,
         skip=skip,
         limit=limit,
     )
+    _admin_debug(
+        "locker_current_state_response_ready",
+        total=response.total,
+        item_count=len(response.items),
+        first_item=response.items[0].model_dump(mode="json") if response.items else None,
+    )
+    return response
 
 
 async def _get_unit_for_admin(context: AdminContext, locker_unit_id: str, db: AsyncSession) -> LockerUnit:
