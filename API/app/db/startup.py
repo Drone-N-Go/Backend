@@ -12,7 +12,14 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 logger = logging.getLogger(__name__)
 
-EXPECTED_ADMIN_REVISION = "20260612_0003"
+EXPECTED_ADMIN_REVISION = "20260612_0004"
+EXPECTED_ADMIN_ROLE_CONSTRAINT_VALUES = {
+    "owner",
+    "master_developer",
+    "manager",
+    "developer",
+    "admin",
+}
 
 REQUIRED_ADMIN_TABLES = {
     "admin_profiles",
@@ -73,7 +80,11 @@ async def _read_schema(connection):
             for table_name in REQUIRED_ADMIN_COLUMNS
             if table_name in tables
         }
-        return tables, columns
+        constraints = {
+            constraint["name"]: constraint.get("sqltext", "")
+            for constraint in inspector.get_check_constraints("admin_profiles")
+        } if "admin_profiles" in tables else {}
+        return tables, columns, constraints
 
     return await connection.run_sync(inspect_schema)
 
@@ -85,7 +96,7 @@ async def verify_admin_schema() -> None:
             revision = (
                 await connection.execute(text("select version_num from alembic_version"))
             ).scalar_one_or_none()
-            tables, columns = await _read_schema(connection)
+            tables, columns, constraints = await _read_schema(connection)
     finally:
         await engine.dispose()
 
@@ -104,6 +115,17 @@ async def verify_admin_schema() -> None:
         missing_columns = sorted(required_columns - existing_columns)
         if missing_columns:
             failures.append(f"{table_name} missing columns: {', '.join(missing_columns)}")
+
+    role_constraint = constraints.get("ck_admin_profiles_role", "")
+    missing_role_values = sorted(
+        role
+        for role in EXPECTED_ADMIN_ROLE_CONSTRAINT_VALUES
+        if role not in role_constraint
+    )
+    if missing_role_values:
+        failures.append(
+            "ck_admin_profiles_role missing values: " + ", ".join(missing_role_values)
+        )
 
     if failures:
         raise RuntimeError("Admin schema verification failed: " + "; ".join(failures))

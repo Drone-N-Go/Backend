@@ -72,4 +72,4 @@ where conrelid = 'admin_profiles'::regclass
   and conname = 'ck_admin_profiles_role';
 ```
 
-Expected roles: `owner`, `master_developer`, `manager`, `developer`, and `admin`.
+Expected roles: `owner`, `master_developer`, `manager`, `developer`, and `admin`. If any are missing, deploy and run Alembic revision `20260612_0004`, which recreates the constraint.
