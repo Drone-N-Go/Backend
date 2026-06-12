@@ -115,6 +115,29 @@ async def upload_images(files: list[UploadFile], folder: str) -> list[str]:
     return uploaded_urls
 
 
+async def upload_image_bytes(image_bytes: bytes, content_type: str = "image/jpeg", prefix: str = "drone-images") -> str:
+    """Upload raw image bytes (e.g. from base64 decode) to S3. Returns the public URL."""
+    s3 = _get_s3_client()
+    unique_filename = f"{uuid.uuid4()}.jpg"
+    s3_key = f"{prefix}/{unique_filename}"
+    try:
+        s3.put_object(
+            Bucket=_require_s3_settings()[2],
+            Key=s3_key,
+            Body=image_bytes,
+            ContentType=content_type,
+        )
+        url = _build_public_url(s3_key)
+        logger.info("Uploaded image bytes to S3: %s", s3_key)
+        return url
+    except (BotoCoreError, ClientError) as e:
+        logger.error("S3 upload_image_bytes failed for key %s: %s", s3_key, str(e))
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Failed to upload image to storage.",
+        )
+
+
 async def upload_video(file: UploadFile, folder: str) -> str:
     """
     Upload a single return video to S3.

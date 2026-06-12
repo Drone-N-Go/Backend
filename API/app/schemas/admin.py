@@ -200,6 +200,44 @@ class MaintenanceTaskListResponse(BaseModel):
     limit: int
 
 
+class AdminLocationCreateRequest(BaseModel):
+    campus_name: str = Field(..., min_length=1, max_length=255)
+    address: str = Field(..., min_length=1)
+    latitude: float
+    longitude: float
+    building_name: Optional[str] = None
+    landmarks: Optional[str] = None
+    directions: Optional[str] = None
+
+
+class AdminLockerUnitCreateRequest(BaseModel):
+    unit_number: str = Field(..., min_length=1, max_length=50)
+
+
+class DroneIntakeRequest(BaseModel):
+    serial_number: str = Field(..., min_length=1, max_length=255)
+    photo_data: list[str] = Field(default_factory=list, description="Base64-encoded JPEG images")
+
+
+class DroneIntakeResponse(BaseModel):
+    drone_id: str
+    model_name: str
+    serial_number: str
+    locker_unit_id: str
+    photo_urls: list[str]
+    message: str
+
+
+class AdminDroneLookupResponse(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
+    id: str
+    model_name: str
+    serial_number: str
+    status: str
+    image_urls: list[str] = []
+
+
 class AdminStatsResponse(BaseModel):
     role: str
     includes_money: bool

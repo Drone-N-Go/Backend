@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.admin_permissions import (
     CREATE_MAINTENANCE_TASK,
     MANAGE_DRONES,
+    MANAGE_LOCATIONS,
     MANAGE_LOCKERS,
     MANAGE_STAFF,
     RESOLVE_MAINTENANCE_TASK,
@@ -21,10 +22,15 @@ from app.core.admin_permissions import (
 from app.core.dependencies import AdminContext, require_admin_profile, require_capability
 from app.db.session import get_db
 from app.schemas.admin import (
+    AdminDroneLookupResponse,
+    AdminLocationCreateRequest,
+    AdminLockerUnitCreateRequest,
     AdminMeResponse,
     AdminProfileListResponse,
     AdminProfileResponse,
     AdminStatsResponse,
+    DroneIntakeRequest,
+    DroneIntakeResponse,
     LockerCurrentStateListResponse,
     LockerCurrentStateResponse,
     LockerDroneAssignmentRequest,
@@ -43,6 +49,7 @@ from app.schemas.admin import (
     StaffRoleUpdateRequest,
     StaffStatusRequest,
 )
+from app.schemas.location import LocationResponse, LockerUnitResponse
 from app.services import admin_service
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
@@ -288,6 +295,76 @@ async def assign_locker_drone(
     context: AdminContext = Depends(require_capability(MANAGE_DRONES)),
 ):
     return await admin_service.assign_locker_drone(context, locker_unit_id, body, db)
+
+
+@router.post(
+    "/locations",
+    response_model=LocationResponse,
+    status_code=201,
+    summary="Create a new locker location",
+)
+async def create_location(
+    body: AdminLocationCreateRequest,
+    db: AsyncSession = Depends(get_db),
+    context: AdminContext = Depends(require_capability(MANAGE_LOCATIONS)),
+):
+    return await admin_service.create_admin_location(context, body, db)
+
+
+@router.delete(
+    "/locations/{location_id}",
+    status_code=204,
+    summary="Delete a locker location and all its units",
+)
+async def delete_location(
+    location_id: str,
+    db: AsyncSession = Depends(get_db),
+    context: AdminContext = Depends(require_capability(MANAGE_LOCATIONS)),
+):
+    await admin_service.delete_admin_location(context, location_id, db)
+
+
+@router.post(
+    "/locations/{location_id}/units",
+    response_model=LockerUnitResponse,
+    status_code=201,
+    summary="Add a locker unit to a location",
+)
+async def create_locker_unit(
+    location_id: str,
+    body: AdminLockerUnitCreateRequest,
+    db: AsyncSession = Depends(get_db),
+    context: AdminContext = Depends(require_capability(MANAGE_LOCKERS)),
+):
+    return await admin_service.create_admin_locker_unit(context, location_id, body, db)
+
+
+@router.get(
+    "/drones/lookup",
+    response_model=AdminDroneLookupResponse,
+    summary="Look up a drone by serial number (from QR scan)",
+)
+async def lookup_drone_by_serial(
+    serial_number: str = Query(..., min_length=1),
+    db: AsyncSession = Depends(get_db),
+    context: AdminContext = Depends(require_capability(MANAGE_DRONES)),
+):
+    return await admin_service.lookup_drone_by_serial(context, serial_number, db)
+
+
+@router.post(
+    "/lockers/{locker_unit_id}/intake",
+    response_model=DroneIntakeResponse,
+    status_code=201,
+    summary="Intake a drone into a locker — assigns drone, stores condition photos",
+)
+async def intake_drone(
+    locker_unit_id: str,
+    body: DroneIntakeRequest,
+    db: AsyncSession = Depends(get_db),
+    context: AdminContext = Depends(require_capability(MANAGE_DRONES)),
+):
+    return await admin_service.intake_drone(context, locker_unit_id, body, db)
 
 
 @router.get(

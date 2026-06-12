@@ -860,6 +860,125 @@ async def get_stats(context: AdminContext, db: AsyncSession) -> AdminStatsRespon
     )
 
 
+async def create_admin_location(
+    context: AdminContext, body: "AdminLocationCreateRequest", db: AsyncSession
+) -> "LocationResponse":
+    from app.services.location_service import create_location as _create_location
+    from app.schemas.location import LocationCreateRequest, LocationResponse as _LocationResponse
+
+    req = LocationCreateRequest(
+        campus_name=body.campus_name,
+        address=body.address,
+        latitude=body.latitude,
+        longitude=body.longitude,
+        building_name=body.building_name,
+        landmarks=body.landmarks,
+        directions=body.directions,
+    )
+    location = await _create_location(req, db)
+    await _audit(db, context, "admin.location_create", "locker_location", location.id, {"campus_name": location.campus_name})
+    return _LocationResponse.model_validate(location)
+
+
+async def delete_admin_location(context: AdminContext, location_id: str, db: AsyncSession) -> None:
+    from app.services.location_service import delete_location as _delete_location
+
+    await _delete_location(location_id, db)
+    await _audit(db, context, "admin.location_delete", "locker_location", location_id, {})
+
+
+async def create_admin_locker_unit(
+    context: AdminContext, location_id: str, body: "AdminLockerUnitCreateRequest", db: AsyncSession
+) -> "LockerUnitResponse":
+    from app.services.location_service import create_unit as _create_unit
+    from app.schemas.location import LockerUnitCreateRequest, LockerUnitResponse as _LockerUnitResponse
+
+    _assert_location_scope(context, location_id)
+    req = LockerUnitCreateRequest(unit_number=body.unit_number)
+    unit = await _create_unit(location_id, req, db)
+    await _audit(db, context, "admin.locker_unit_create", "locker_unit", unit.id, {"unit_number": unit.unit_number})
+    return _LockerUnitResponse.model_validate(unit)
+
+
+async def lookup_drone_by_serial(
+    context: AdminContext, serial_number: str, db: AsyncSession
+) -> "AdminDroneLookupResponse":
+    result = await db.execute(select(Drone).where(Drone.serial_number == serial_number))
+    drone = result.scalar_one_or_none()
+    if not drone:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No drone found with that serial number.")
+    from app.schemas.admin import AdminDroneLookupResponse
+    return AdminDroneLookupResponse(
+        id=drone.id,
+        model_name=drone.model_name,
+        serial_number=drone.serial_number,
+        status=drone.status,
+        image_urls=drone.image_urls or [],
+    )
+
+
+async def intake_drone(
+    context: AdminContext, locker_unit_id: str, body: "DroneIntakeRequest", db: AsyncSession
+) -> "DroneIntakeResponse":
+    import base64
+    from app.services.s3_service import upload_image_bytes
+    from app.schemas.admin import DroneIntakeResponse
+
+    unit = await _get_unit_for_admin(context, locker_unit_id, db)
+    if unit.current_drone_id:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This locker unit already has a drone assigned.",
+        )
+
+    result = await db.execute(select(Drone).where(Drone.serial_number == body.serial_number))
+    drone = result.scalar_one_or_none()
+    if not drone:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No drone found with that serial number.")
+
+    # Upload condition photos to S3
+    photo_urls: list[str] = []
+    for i, b64 in enumerate(body.photo_data):
+        try:
+            image_bytes = base64.b64decode(b64)
+            url = await upload_image_bytes(
+                image_bytes,
+                content_type="image/jpeg",
+                prefix=f"drone-intake/{drone.id}",
+            )
+            photo_urls.append(url)
+        except Exception:
+            _admin_debug("intake_photo_upload_failed", drone_id=drone.id, index=i)
+
+    # Persist: update drone image_urls, assign to locker
+    drone.image_urls = photo_urls if photo_urls else drone.image_urls
+    drone.status = "available"
+    drone.assigned_locker_location_id = unit.location_id
+    db.add(drone)
+
+    unit.current_drone_id = drone.id
+    unit.status = "occupied"
+    db.add(unit)
+    await db.flush()
+
+    await _audit(
+        db,
+        context,
+        "admin.drone_intake",
+        "locker_unit",
+        unit.id,
+        {"drone_id": drone.id, "serial_number": drone.serial_number, "photo_count": len(photo_urls)},
+    )
+    return DroneIntakeResponse(
+        drone_id=drone.id,
+        model_name=drone.model_name,
+        serial_number=drone.serial_number,
+        locker_unit_id=unit.id,
+        photo_urls=photo_urls,
+        message=f"{drone.model_name} successfully checked into locker {unit.unit_number}.",
+    )
+
+
 async def list_unmapped_smiota_events(context: AdminContext, db: AsyncSession, limit: int = 50) -> list[SmiotaEventSummary]:
     if not has_global_location_scope(context.profile.role):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Global admin scope required.")
