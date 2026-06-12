@@ -224,6 +224,8 @@ class DroneIntakeRequest(BaseModel):
 
 
 class DroneIntakeResponse(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
     drone_id: str
     model_name: str
     serial_number: str
