@@ -32,6 +32,10 @@ from app.models.damage_report import DamageReport       # noqa: F401, E402
 from app.models.smiota_event import SmiotaEvent         # noqa: F401, E402
 from app.models.login_attempt import LoginAttempt       # noqa: F401, E402
 from app.models.refresh_token import RefreshToken       # noqa: F401, E402
+from app.models.admin_profile import AdminLocationAssignment, AdminProfile  # noqa: F401, E402
+from app.models.admin_audit_event import AdminAuditEvent  # noqa: F401, E402
+from app.models.locker_access_event import LockerAccessEvent  # noqa: F401, E402
+from app.models.maintenance_task import MaintenanceTask  # noqa: F401, E402
 
 config = context.config
 
