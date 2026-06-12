@@ -40,6 +40,7 @@ from app.schemas.admin import (
     PasscodeRevealResponse,
     SmiotaEventSummary,
     StaffCreateRequest,
+    StaffRoleUpdateRequest,
     StaffStatusRequest,
 )
 from app.services import admin_service
@@ -128,6 +129,20 @@ async def set_staff_status(
     context: AdminContext = Depends(require_capability(MANAGE_STAFF)),
 ):
     return await admin_service.set_staff_status(context, profile_id, body.status, db)
+
+
+@router.patch(
+    "/staff/{profile_id}/role",
+    response_model=AdminProfileResponse,
+    summary="Update the role of an admin staff profile",
+)
+async def update_staff_role(
+    profile_id: str,
+    body: StaffRoleUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    context: AdminContext = Depends(require_capability(MANAGE_STAFF)),
+):
+    return await admin_service.update_staff_role(context, profile_id, body.role, db)
 
 
 @router.get(

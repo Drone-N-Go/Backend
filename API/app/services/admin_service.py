@@ -305,6 +305,28 @@ async def set_staff_status(
     return _profile_response(target, [a.location_id for a in target.location_assignments])
 
 
+async def update_staff_role(
+    context: AdminContext, profile_id: str, new_role: str, db: AsyncSession
+) -> AdminProfileResponse:
+    target = await _get_admin_profile(profile_id, db)
+    # Actor must be able to manage both the target's current role and the new role.
+    _assert_can_manage_role(context.profile.role, target.role)
+    _assert_can_manage_role(context.profile.role, new_role)
+    old_role = target.role
+    target.role = new_role
+    db.add(target)
+    await db.flush()
+    await _audit(
+        db,
+        context,
+        "admin.staff_role_updated",
+        "admin_profile",
+        target.id,
+        {"old_role": old_role, "new_role": new_role},
+    )
+    return _profile_response(target, [a.location_id for a in target.location_assignments])
+
+
 async def _latest_smiota_event_for_unit(unit: LockerUnit, db: AsyncSession) -> SmiotaEvent | None:
     criteria = []
     if unit.smiota_unit_identifier:

@@ -67,6 +67,10 @@ class StaffStatusRequest(BaseModel):
     status: str = Field(..., pattern="^(active|suspended)$")
 
 
+class StaffRoleUpdateRequest(BaseModel):
+    role: str = Field(..., pattern=ROLE_PATTERN)
+
+
 class AdminProfileListResponse(BaseModel):
     items: list[AdminProfileResponse]
     total: int
