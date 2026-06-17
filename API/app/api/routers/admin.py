@@ -299,7 +299,17 @@ async def create_location(
     db: AsyncSession = Depends(get_db),
     context: AdminContext = Depends(require_capability(MANAGE_LOCATIONS)),
 ):
-    return await admin_service.create_admin_location(context, body, db)
+    import sys, traceback as _tb
+    print(f"[DEBUG] POST /admin/locations body={body.model_dump()}", flush=True, file=sys.stderr)
+    try:
+        result = await admin_service.create_admin_location(context, body, db)
+        print(f"[DEBUG] POST /admin/locations success id={result.id}", flush=True, file=sys.stderr)
+        return result
+    except Exception as exc:
+        print(f"[DEBUG] POST /admin/locations EXCEPTION {type(exc).__name__}: {exc}", flush=True, file=sys.stderr)
+        _tb.print_exc(file=sys.stderr)
+        sys.stderr.flush()
+        raise
 
 
 @router.delete(
