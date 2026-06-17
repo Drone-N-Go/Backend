@@ -1122,6 +1122,7 @@ async def create_admin_location(
         db.add(unit)
 
     await db.flush()
+    await db.refresh(location)
     await _audit(
         db,
         context,
