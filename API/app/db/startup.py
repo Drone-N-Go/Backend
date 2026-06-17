@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 logger = logging.getLogger(__name__)
 
-EXPECTED_ADMIN_REVISION = "20260612_0005"
+EXPECTED_ADMIN_REVISION = "20260617_0006"
 EXPECTED_ADMIN_ROLE_CONSTRAINT_VALUES = {
     "owner",
     "master_developer",
