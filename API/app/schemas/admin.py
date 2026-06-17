@@ -25,6 +25,7 @@ class AdminProfileResponse(BaseModel):
     title: Optional[str]
     phone: Optional[str]
     notes: Optional[str]
+    must_change_password: bool = False
     created_at: datetime
     updated_at: datetime
     user: Optional[UserResponse] = None

@@ -9,11 +9,13 @@ User management endpoints:
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import get_current_user
 from app.core.security import hash_password, verify_password
 from app.db.session import get_db
+from app.models.admin_profile import AdminProfile
 from app.models.user import User
 from app.schemas.user import UserResponse, UserUpdateRequest
 from app.services import user_service
@@ -65,5 +67,15 @@ async def change_my_password(
             detail="Current password is incorrect.",
         )
     current_user.password_hash = hash_password(body.new_password)
+
+    # Clear the forced-change flag if this user has an admin profile.
+    result = await db.execute(
+        select(AdminProfile).where(AdminProfile.user_id == current_user.id)
+    )
+    admin_profile = result.scalar_one_or_none()
+    if admin_profile and admin_profile.must_change_password:
+        admin_profile.must_change_password = False
+        db.add(admin_profile)
+
     await db.commit()
     return None

@@ -221,6 +221,7 @@ async def setup_first_owner(body: OwnerSetupRequest, db: AsyncSession) -> OwnerS
         status="active",
         title=body.title,
         phone=body.phone,
+        must_change_password=False,
     )
     db.add(profile)
     await db.flush()
@@ -297,6 +298,7 @@ async def create_staff(context: AdminContext, body: StaffCreateRequest, db: Asyn
         title=body.title,
         phone=body.phone,
         notes=body.notes,
+        must_change_password=True,
     )
     db.add(profile)
     await db.flush()
