@@ -43,18 +43,11 @@ settings = get_settings()
 
 def _debug_log_exception(prefix: str, request: Request, exc: Exception) -> None:
     logger.error(
-        "%s method=%s path=%s query=%s exc_type=%s exc=%r",
+        "%s method=%s path=%s exc_type=%s",
         prefix,
         request.method,
         request.url.path,
-        str(request.url.query),
         type(exc).__name__,
-        exc,
-    )
-    print(
-        f"{prefix} method={request.method} path={request.url.path} "
-        f"query={request.url.query!r} exc_type={type(exc).__name__} exc={exc!r}",
-        flush=True,
     )
     logger.exception("%s traceback", prefix)
 
@@ -77,9 +70,11 @@ app = FastAPI(
     version="1.0.0",
     contact={"name": "Drone N' Go", "email": "james@droneandgo.io"},
     license_info={"name": "Proprietary"},
-    docs_url="/docs",
-    redoc_url="/redoc",
-    openapi_url="/openapi.json",
+    # Disable interactive API docs in production — they expose the full API surface
+    # to anyone who knows the URL and are unnecessary in a live environment.
+    docs_url=None if settings.is_production else "/docs",
+    redoc_url=None if settings.is_production else "/redoc",
+    openapi_url=None if settings.is_production else "/openapi.json",
 )
 
 app.add_middleware(

@@ -48,13 +48,23 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------ #
     # CORS
     # ------------------------------------------------------------------ #
+    # In production, set CORS_ORIGINS to a comma-separated list of allowed
+    # origins, e.g. "https://app.droneandgo.io,https://admin.droneandgo.io".
+    # Wildcard ("*") is rejected in production because allow_credentials=True
+    # is incompatible with a wildcard origin (CORS spec §3.2.2) and creates a
+    # broad attack surface. In development the default remains "*" for convenience.
     cors_origins: str = "*"
 
     @property
     def cors_origins_list(self) -> List[str]:
         if self.cors_origins == "*":
+            if self.is_production:
+                raise ValueError(
+                    "CORS_ORIGINS must be explicitly configured in production. "
+                    "Set CORS_ORIGINS to a comma-separated list of allowed origins."
+                )
             return ["*"]
-        return [o.strip() for o in self.cors_origins.split(",")]
+        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
 
     # ------------------------------------------------------------------ #
     # AWS S3

@@ -40,7 +40,7 @@ class AdminMeResponse(BaseModel):
 
 class OwnerSetupRequest(BaseModel):
     email: EmailStr
-    password: str = Field(..., min_length=6)
+    password: str = Field(..., min_length=8, description="Minimum 8 characters")
     first_name: str = Field(..., min_length=1, max_length=100)
     last_name: str = Field(..., min_length=1, max_length=100)
     title: Optional[str] = None
@@ -53,7 +53,7 @@ class OwnerSetupResponse(TokenResponse):
 
 class StaffCreateRequest(BaseModel):
     email: EmailStr
-    password: str = Field(..., min_length=6)
+    password: str = Field(..., min_length=8, description="Minimum 8 characters")
     first_name: str = Field(..., min_length=1, max_length=100)
     last_name: str = Field(..., min_length=1, max_length=100)
     role: str = Field(..., pattern=ROLE_PATTERN)
@@ -204,6 +204,8 @@ class MaintenanceTaskListResponse(BaseModel):
 
 class AdminLocationCreateRequest(BaseModel):
     campus_name: str = Field(..., min_length=1, max_length=255)
+    locker_hardware_id: str = Field(..., min_length=1, max_length=255, description="Physical locker hardware identifier (e.g. 'A1', 'UNIT-01')")
+    cabinet_count: int = Field(..., ge=1, le=50, description="Number of cabinets inside this locker")
     address: str = Field(..., min_length=1)
     latitude: float
     longitude: float

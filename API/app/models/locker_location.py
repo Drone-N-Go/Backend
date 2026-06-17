@@ -21,6 +21,7 @@ class LockerLocation(Base):
         UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4())
     )
     campus_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    locker_hardware_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     address: Mapped[str] = mapped_column(Text, nullable=False)
     latitude: Mapped[float] = mapped_column(Double, nullable=False)
     longitude: Mapped[float] = mapped_column(Double, nullable=False)

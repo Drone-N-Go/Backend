@@ -43,7 +43,7 @@ def _hash_token(token: str) -> str:
 
 
 async def build_token_response(user: User, db: AsyncSession) -> TokenResponse:
-    print(f"AUTH_TRACE build_token_response start user_id={user.id} email={user.email}")
+    logger.debug("build_token_response user_id=%s", user.id)
     access_token = create_access_token(user.id, user.email)
     refresh_token = create_refresh_token(user.id)
     expires_at = datetime.now(timezone.utc) + timedelta(days=settings.refresh_token_expire_days)
@@ -55,7 +55,7 @@ async def build_token_response(user: User, db: AsyncSession) -> TokenResponse:
         )
     )
     await db.flush()
-    print(f"AUTH_TRACE build_token_response refresh_token_flushed user_id={user.id}")
+    logger.debug("build_token_response refresh_token_stored user_id=%s", user.id)
     return TokenResponse(
         access_token=access_token,
         refresh_token=refresh_token,
@@ -80,14 +80,51 @@ async def _get_or_create_attempt(db: AsyncSession, identifier: str) -> LoginAtte
 # Public service functions
 # --------------------------------------------------------------------------- #
 
-async def register_user(body: UserRegisterRequest, db: AsyncSession) -> TokenResponse:
-    """Register a new user account. Email must be unique."""
+async def register_user(
+    body: UserRegisterRequest, request: "Request", db: AsyncSession
+) -> TokenResponse:
+    """
+    Register a new user account. Email must be unique.
+
+    Rate-limiting: registration attempts are tracked per IP using the same
+    LoginAttempt table as login. This prevents bulk account creation and
+    email enumeration (which would otherwise be possible via the 409 response).
+    """
+    from fastapi import Request as _Request
+    client_ip = getattr(getattr(request, "client", None), "host", "unknown")
+    # Use a "register:" prefix so register attempts don't contaminate login counters.
+    identifier = f"register:{client_ip}"
+    attempt = await _get_or_create_attempt(db, identifier)
+
+    if attempt.lockout_until and attempt.lockout_until > datetime.now(timezone.utc):
+        remaining = int((attempt.lockout_until - datetime.now(timezone.utc)).total_seconds() / 60)
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Too many registration attempts. Try again in {remaining} minute(s).",
+        )
+
     existing = await db.execute(select(User).where(User.email == body.email.lower()))
     if existing.scalar_one_or_none():
+        # Increment the registration rate-limit counter on duplicate-email attempts.
+        # This prevents rapid enumeration: an attacker cycling emails gets locked out
+        # after 10 attempts (double the login threshold) from the same IP.
+        attempt.count += 1
+        attempt.updated_at = datetime.now(timezone.utc)
+        if attempt.count >= settings.max_login_attempts * 2:
+            attempt.lockout_until = datetime.now(timezone.utc) + timedelta(
+                minutes=settings.lockout_minutes
+            )
+        await db.flush()
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="An account with this email already exists.",
         )
+
+    # Successful registration — reset counter.
+    attempt.count = 0
+    attempt.lockout_until = None
+    attempt.updated_at = datetime.now(timezone.utc)
+    await db.flush()
 
     user = User(
         email=body.email.lower(),
@@ -100,7 +137,7 @@ async def register_user(body: UserRegisterRequest, db: AsyncSession) -> TokenRes
     )
     db.add(user)
     await db.flush()
-    logger.info("New user registered: %s", user.email)
+    logger.info("New user registered user_id=%s", user.id)
     return await build_token_response(user, db)
 
 
@@ -113,13 +150,10 @@ async def login_user(
     """
     client_ip = request.client.host if request.client else "unknown"
     identifier = f"{client_ip}:{email.lower()}"
-    print(f"AUTH_TRACE login_user start email={email.lower()} client_ip={client_ip}")
+    logger.debug("login_user start client_ip=%s", client_ip)
 
     attempt = await _get_or_create_attempt(db, identifier)
-    print(
-        "AUTH_TRACE login_user attempt_loaded "
-        f"email={email.lower()} count={attempt.count} locked={attempt.lockout_until is not None}"
-    )
+    logger.debug("login_user attempt_loaded count=%d locked=%s", attempt.count, attempt.lockout_until is not None)
 
     # Check lockout
     if attempt.lockout_until and attempt.lockout_until > datetime.now(timezone.utc):
@@ -132,12 +166,11 @@ async def login_user(
     # Fetch user
     result = await db.execute(select(User).where(User.email == email.lower()))
     user = result.scalar_one_or_none()
-    print(f"AUTH_TRACE login_user user_lookup email={email.lower()} found={user is not None}")
 
     if not user or not verify_password(password, user.password_hash):
         attempt.count += 1
         attempt.updated_at = datetime.now(timezone.utc)
-        print(f"AUTH_TRACE login_user invalid_credentials email={email.lower()} count={attempt.count}")
+        logger.debug("login_user invalid_credentials count=%d", attempt.count)
 
         if attempt.count >= settings.max_login_attempts:
             attempt.lockout_until = datetime.now(timezone.utc) + timedelta(
@@ -161,8 +194,7 @@ async def login_user(
     attempt.updated_at = datetime.now(timezone.utc)
     await db.flush()
 
-    logger.info("User logged in: %s", user.email)
-    print(f"AUTH_TRACE login_user success user_id={user.id} email={user.email}")
+    logger.info("User logged in user_id=%s", user.id)
     return await build_token_response(user, db)
 
 

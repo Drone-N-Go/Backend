@@ -38,6 +38,7 @@ class LockerUnit(Base):
     smiota_locker_name: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     smiota_unit_identifier: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     smiota_metadata: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict, server_default="{}")
+    current_passcode: Mapped[str | None] = mapped_column(String(50), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

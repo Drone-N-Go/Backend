@@ -81,12 +81,12 @@ logger = logging.getLogger(__name__)
 
 
 def _admin_debug(message: str, **values) -> None:
+    """Emit a debug-level structured log. Silenced in production via log-level config."""
     rendered_values = " ".join(f"{key}={value!r}" for key, value in values.items())
     line = f"ADMIN_DEBUG {message}"
     if rendered_values:
         line = f"{line} {rendered_values}"
-    logger.error(line)
-    print(line, flush=True)
+    logger.debug(line)
 
 
 def _profile_response(profile: AdminProfile, assigned_location_ids: list[str] | None = None) -> AdminProfileResponse:
@@ -182,22 +182,16 @@ async def _get_admin_profile(profile_id: str, db: AsyncSession) -> AdminProfile:
 
 
 async def get_me(context: AdminContext) -> AdminProfileResponse:
-    print(
-        "ADMIN_TRACE get_me service "
-        f"user_id={context.user.id} profile_id={context.profile.id} "
-        f"role={context.profile.role} assigned_locations={len(context.assigned_location_ids)}"
-    )
     return _profile_response(context.profile, sorted(context.assigned_location_ids))
 
 
 async def setup_first_owner(body: OwnerSetupRequest, db: AsyncSession) -> OwnerSetupResponse:
-    print(f"ADMIN_TRACE setup_first_owner start email={body.email}")
+    logger.info("setup_first_owner start")
     active_count = (
         await db.execute(
             select(func.count()).select_from(AdminProfile).where(AdminProfile.status == "active")
         )
     ).scalar_one()
-    print(f"ADMIN_TRACE setup_first_owner active_admin_count={active_count}")
     if active_count:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -206,13 +200,11 @@ async def setup_first_owner(body: OwnerSetupRequest, db: AsyncSession) -> OwnerS
 
     existing_user = await db.execute(select(User).where(User.email == body.email.lower()))
     if existing_user.scalar_one_or_none():
-        print(f"ADMIN_TRACE setup_first_owner existing_user_conflict email={body.email}")
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="An account with this email already exists.",
         )
 
-    print(f"ADMIN_TRACE setup_first_owner creating_user email={body.email}")
     user = User(
         email=body.email.lower(),
         password_hash=hash_password(body.password),
@@ -222,7 +214,6 @@ async def setup_first_owner(body: OwnerSetupRequest, db: AsyncSession) -> OwnerS
     )
     db.add(user)
     await db.flush()
-    print(f"ADMIN_TRACE setup_first_owner user_flushed user_id={user.id}")
 
     profile = AdminProfile(
         user_id=user.id,
@@ -233,10 +224,8 @@ async def setup_first_owner(body: OwnerSetupRequest, db: AsyncSession) -> OwnerS
     )
     db.add(profile)
     await db.flush()
-    print(f"ADMIN_TRACE setup_first_owner profile_flushed profile_id={profile.id}")
 
     token_data = await auth_service.build_token_response(user, db)
-    print(f"ADMIN_TRACE setup_first_owner token_created user_id={user.id}")
     await _audit(
         db,
         None,
@@ -245,10 +234,9 @@ async def setup_first_owner(body: OwnerSetupRequest, db: AsyncSession) -> OwnerS
         profile.id,
         {"email": user.email},
     )
-    print(f"ADMIN_TRACE setup_first_owner audit_written profile_id={profile.id}")
 
+    logger.info("setup_first_owner complete profile_id=%s", profile.id)
     profile.user = user
-    print(f"ADMIN_TRACE setup_first_owner response_ready profile_id={profile.id}")
     return OwnerSetupResponse(
         access_token=token_data.access_token,
         refresh_token=token_data.refresh_token,
@@ -588,7 +576,8 @@ async def _locker_state(unit: LockerUnit, db: AsyncSession) -> LockerCurrentStat
     event = await _latest_smiota_event_for_unit(unit, db)
     booking = await _active_booking_for_unit(unit, db)
     task_count = await _active_task_count(unit.id, db)
-    passcode = event.passcode if event else None
+    # Passcode availability is authoritative on the unit itself.
+    has_passcode = bool(unit.current_passcode)
 
     response = LockerCurrentStateResponse(
         id=unit.id,
@@ -599,8 +588,8 @@ async def _locker_state(unit: LockerUnit, db: AsyncSession) -> LockerCurrentStat
         status=unit.status,
         smiota_locker_name=unit.smiota_locker_name,
         smiota_unit_identifier=unit.smiota_unit_identifier,
-        has_current_passcode=bool(passcode),
-        passcode_mask="••••••" if passcode else None,
+        has_current_passcode=has_passcode,
+        passcode_mask="••••••" if has_passcode else None,
         latest_tracking_id=event.tracking_id if event else None,
         latest_event=_event_summary(event),
         assigned_drone=_drone_summary(unit.current_drone),
@@ -762,19 +751,20 @@ async def reveal_locker_passcode(
     context: AdminContext, locker_unit_id: str, body: PasscodeRevealRequest, db: AsyncSession
 ) -> PasscodeRevealResponse:
     unit = await _get_unit_for_admin(context, locker_unit_id, db)
-    event = await _latest_smiota_event_for_unit(unit, db)
-    if not event or not event.passcode:
+    if not unit.current_passcode:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="No current Smiota passcode is available for this locker.",
+            detail="No current passcode is available for this cabinet.",
         )
+    # Still fetch the latest smiota event so we can surface tracking/courier info.
+    event = await _latest_smiota_event_for_unit(unit, db)
     booking = await _active_booking_for_unit(unit, db)
     access_event = LockerAccessEvent(
         admin_profile_id=context.profile.id,
         locker_unit_id=unit.id,
         drone_id=unit.current_drone_id,
         booking_id=booking.id if booking else None,
-        smiota_event_id=event.id,
+        smiota_event_id=event.id if event else None,
         reason=body.reason,
         app_context=body.app_context,
     )
@@ -788,16 +778,16 @@ async def reveal_locker_passcode(
         unit.id,
         {
             "locker_access_event_id": access_event.id,
-            "smiota_event_id": event.id,
+            "smiota_event_id": event.id if event else None,
             "reason": body.reason,
         },
     )
     return PasscodeRevealResponse(
         locker_unit_id=unit.id,
-        passcode=event.passcode,
-        courier_code=event.courier_code,
-        tracking_id=event.tracking_id,
-        smiota_event_id=event.id,
+        passcode=unit.current_passcode,
+        courier_code=event.courier_code if event else None,
+        tracking_id=event.tracking_id if event else None,
+        smiota_event_id=event.id if event else None,
         locker_access_event_id=access_event.id,
     )
 
@@ -1113,7 +1103,34 @@ async def create_admin_location(
         directions=body.directions,
     )
     location = await _create_location(req, db)
-    await _audit(db, context, "admin.location_create", "locker_location", location.id, {"campus_name": location.campus_name})
+
+    # Persist the hardware ID on the location row.
+    location.locker_hardware_id = body.locker_hardware_id
+    db.add(location)
+
+    # Bulk-create one LockerUnit per cabinet, pre-wired to the Smiota locker name.
+    for n in range(1, body.cabinet_count + 1):
+        unit = LockerUnit(
+            location_id=location.id,
+            unit_number=str(n),
+            status="available",
+            smiota_locker_name=body.locker_hardware_id,
+        )
+        db.add(unit)
+
+    await db.flush()
+    await _audit(
+        db,
+        context,
+        "admin.location_create",
+        "locker_location",
+        location.id,
+        {
+            "campus_name": location.campus_name,
+            "locker_hardware_id": body.locker_hardware_id,
+            "cabinet_count": body.cabinet_count,
+        },
+    )
     return _LocationResponse.model_validate(location)
 
 

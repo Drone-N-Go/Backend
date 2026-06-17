@@ -65,12 +65,12 @@ logger = logging.getLogger(__name__)
 
 
 def _admin_route_debug(message: str, **values) -> None:
+    """Emit a structured debug-level log. Silenced in production via log-level config."""
     rendered_values = " ".join(f"{key}={value!r}" for key, value in values.items())
     line = f"ADMIN_DEBUG_ROUTE {message}"
     if rendered_values:
         line = f"{line} {rendered_values}"
-    logger.error(line)
-    print(line, flush=True)
+    logger.debug(line)
 
 
 @router.post(
@@ -83,14 +83,7 @@ async def setup_owner(
     body: OwnerSetupRequest,
     db: AsyncSession = Depends(get_db),
 ):
-    logger.info("ADMIN_TRACE setup_owner route start email=%s", body.email)
-    try:
-        response = await admin_service.setup_first_owner(body, db)
-        logger.info("ADMIN_TRACE setup_owner route success user_id=%s", response.user.id)
-        return response
-    except Exception:
-        logger.exception("ADMIN_TRACE setup_owner route failed email=%s", body.email)
-        raise
+    return await admin_service.setup_first_owner(body, db)
 
 
 @router.get(
@@ -99,18 +92,8 @@ async def setup_owner(
     summary="Get the current admin profile and capabilities",
 )
 async def me(context: AdminContext = Depends(require_admin_profile)):
-    logger.info(
-        "ADMIN_TRACE admin_me route start user_id=%s profile_id=%s",
-        context.user.id,
-        context.profile.id,
-    )
-    try:
-        profile = await admin_service.get_me(context)
-        logger.info("ADMIN_TRACE admin_me route success profile_id=%s", profile.id)
-        return AdminMeResponse(profile=profile)
-    except Exception:
-        logger.exception("ADMIN_TRACE admin_me route failed profile_id=%s", context.profile.id)
-        raise
+    profile = await admin_service.get_me(context)
+    return AdminMeResponse(profile=profile)
 
 
 @router.get(

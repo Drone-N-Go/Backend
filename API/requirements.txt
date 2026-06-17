@@ -5,11 +5,12 @@ asyncpg==0.29.0
 psycopg2-binary==2.9.9
 pydantic[email]==2.7.1
 pydantic-settings==2.2.1
-python-dotenv==1.0.1
-python-multipart==0.0.9
-pyjwt==2.8.0
+python-dotenv==1.2.2
+python-multipart==0.0.31
+pyjwt==2.13.0
 bcrypt==4.1.3
 alembic==1.13.1
 boto3==1.34.102
 botocore==1.34.102
-python-jose[cryptography]==3.3.0
+# python-jose removed: CVE-2024-33664 (algorithm confusion) and CVE-2024-33663 (PKCS1 v1.5 timing).
+# This project uses PyJWT exclusively for JWT operations.

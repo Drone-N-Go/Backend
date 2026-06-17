@@ -60,10 +60,11 @@ def _set_auth_cookies(response: Response, token_data: TokenResponse) -> None:
 )
 async def register(
     body: UserRegisterRequest,
+    request: Request,
     response: Response,
     db: AsyncSession = Depends(get_db),
 ):
-    token_data = await auth_service.register_user(body, db)
+    token_data = await auth_service.register_user(body, request, db)
     _set_auth_cookies(response, token_data)
     return token_data
 
@@ -79,15 +80,9 @@ async def login(
     response: Response,
     db: AsyncSession = Depends(get_db),
 ):
-    logger.info("AUTH_TRACE login route start email=%s", body.email)
-    try:
-        token_data = await auth_service.login_user(body.email, body.password, request, db)
-        _set_auth_cookies(response, token_data)
-        logger.info("AUTH_TRACE login route success user_id=%s", token_data.user.id)
-        return token_data
-    except Exception:
-        logger.exception("AUTH_TRACE login route failed email=%s", body.email)
-        raise
+    token_data = await auth_service.login_user(body.email, body.password, request, db)
+    _set_auth_cookies(response, token_data)
+    return token_data
 
 
 @router.post(

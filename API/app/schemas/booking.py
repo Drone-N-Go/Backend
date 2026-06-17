@@ -31,10 +31,10 @@ class BookingCancelRequest(BaseModel):
 
 
 class EvidenceCompletionRequest(BaseModel):
-    skip_evidence_check: bool = Field(
-        default=False,
-        description="Development/demo override for completing a documentation step without uploaded evidence.",
-    )
+    # skip_evidence_check was removed — it was a development shortcut that allowed
+    # clients to bypass mandatory photo/video evidence collection, which is a security
+    # control (damage liability protection). All evidence gates are now always enforced.
+    pass
 
 
 class CaseQRVerificationRequest(BaseModel):
@@ -56,7 +56,9 @@ class BookingResponse(BaseModel):
     status: str
     total_cost: Decimal
     smiota_object_id: Optional[str]
-    smiota_passcode: Optional[str]
+    # smiota_passcode is intentionally excluded from the general booking response.
+    # Locker credentials are only returned via the dedicated /passcode endpoint,
+    # which enforces ownership + status checks before revealing them.
     smiota_locker_name: Optional[str]
     smiota_courier_code: Optional[str]
     ready_for_pickup_at: Optional[datetime]

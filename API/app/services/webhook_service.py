@@ -14,10 +14,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.models.booking import Booking
 from app.models.drone import Drone
+from app.models.locker_unit import LockerUnit
 from app.models.smiota_event import SmiotaEvent
 from app.schemas.webhook import SmiotaWebhookRequest, SmiotaWebhookResponse
 
 import base64
+import hmac as _hmac
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -63,7 +65,8 @@ def verify_smiota_auth(request: Request) -> None:
             detail=str(exc),
         )
 
-    if api_key != expected_api_key:
+    # Use constant-time comparison to prevent timing attacks on the API key.
+    if not _hmac.compare_digest(api_key, expected_api_key):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid API key.",
@@ -118,7 +121,33 @@ async def process_smiota_webhook(
 
     # 3. Handle event types
     if body.notification_type == "PackageDeposited":
-        # Store locker access details on the booking
+        if booking.status not in {"reserved", "ready_for_pickup"}:
+            logger.warning(
+                "Ignoring PackageDeposited for booking %s in status %s",
+                booking.id,
+                booking.status,
+            )
+            event.processed = True
+            db.add(event)
+            await db.flush()
+            return SmiotaWebhookResponse(
+                status="received",
+                message="Event ignored because booking is no longer awaiting pickup.",
+                booking_id=booking.id,
+            )
+
+        if booking.status == "ready_for_pickup" and booking.smiota_passcode:
+            logger.info("Duplicate PackageDeposited ignored for booking %s", booking.id)
+            event.processed = True
+            db.add(event)
+            await db.flush()
+            return SmiotaWebhookResponse(
+                status="received",
+                message="Duplicate deposit event ignored.",
+                booking_id=booking.id,
+            )
+
+        # Store locker access details on the booking (consumer app reads from here).
         booking.smiota_passcode = body.passcode
         booking.smiota_locker_name = body.lockerName
         booking.smiota_courier_code = body.courierCode
@@ -126,6 +155,26 @@ async def process_smiota_webhook(
             booking.status = "ready_for_pickup"
             booking.ready_for_pickup_at = datetime.now(timezone.utc)
         db.add(booking)
+
+        # Also write the passcode directly onto the cabinet so admins can reveal it.
+        if booking.drone_id and body.passcode:
+            unit_result = await db.execute(
+                select(LockerUnit).where(LockerUnit.current_drone_id == booking.drone_id)
+            )
+            unit = unit_result.scalar_one_or_none()
+            if unit:
+                unit.current_passcode = body.passcode
+                db.add(unit)
+                logger.info(
+                    "PackageDeposited — cabinet %s passcode stored | locker: %s",
+                    unit.id,
+                    body.lockerName,
+                )
+            else:
+                logger.warning(
+                    "PackageDeposited — no locker unit found for drone_id %s",
+                    booking.drone_id,
+                )
 
         logger.info(
             "PackageDeposited — booking %s ready for pickup | locker: %s",
@@ -141,6 +190,16 @@ async def process_smiota_webhook(
         if drone:
             drone.status = "rented"
             db.add(drone)
+
+        # Clear the cabinet passcode — drone is no longer inside.
+        if booking.drone_id:
+            unit_result = await db.execute(
+                select(LockerUnit).where(LockerUnit.current_drone_id == booking.drone_id)
+            )
+            unit = unit_result.scalar_one_or_none()
+            if unit:
+                unit.current_passcode = None
+                db.add(unit)
 
         logger.info(
             "PackagePickedUp — booking %s audited | drone %s remains rented",

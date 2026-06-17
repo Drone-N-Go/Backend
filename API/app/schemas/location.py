@@ -66,6 +66,7 @@ class LockerUnitResponse(BaseModel):
 class LocationResponse(BaseModel):
     id: str
     campus_name: str
+    locker_hardware_id: Optional[str]
     address: str
     latitude: float
     longitude: float

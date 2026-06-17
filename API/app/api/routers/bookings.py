@@ -257,7 +257,7 @@ async def complete_before_photos(
     current_user: User = Depends(get_current_user),
 ):
     booking = await booking_service.complete_before_photos(
-        booking_id, body.skip_evidence_check, current_user, db
+        booking_id, False, current_user, db
     )
     return await booking_service.get_booking_detail(booking.id, current_user, db)
 
@@ -317,7 +317,7 @@ async def complete_after_photos(
     current_user: User = Depends(get_current_user),
 ):
     booking = await booking_service.complete_after_photos(
-        booking_id, body.skip_evidence_check, current_user, db
+        booking_id, False, current_user, db
     )
     return await booking_service.get_booking_detail(booking.id, current_user, db)
 
@@ -348,7 +348,7 @@ async def complete_return_video(
     current_user: User = Depends(get_current_user),
 ):
     booking = await booking_service.complete_return_video(
-        booking_id, body.skip_evidence_check, current_user, db
+        booking_id, False, current_user, db
     )
     return await booking_service.get_booking_detail(booking.id, current_user, db)
 

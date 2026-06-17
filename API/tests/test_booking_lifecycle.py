@@ -67,12 +67,15 @@ class BookingLifecycleTests(TestCase):
 
     def test_required_evidence_is_enforced(self):
         with self.assertRaises(HTTPException) as raised:
-            _assert_evidence(None, "pre_rental", skip_evidence_check=False)
+            _assert_evidence(None, "pre_rental")
 
         self.assertEqual(raised.exception.status_code, 409)
 
-    def test_evidence_check_supports_demo_override(self):
-        _assert_evidence(None, "pre_rental", skip_evidence_check=True)
+    def test_evidence_check_has_no_demo_override(self):
+        with self.assertRaises(HTTPException) as raised:
+            _assert_evidence(None, "pre_rental")
+
+        self.assertEqual(raised.exception.status_code, 409)
 
     def test_return_video_evidence_accepts_uploaded_url(self):
         report = DamageReport(
@@ -85,4 +88,4 @@ class BookingLifecycleTests(TestCase):
             condition_status="needs_review",
         )
 
-        _assert_evidence(report, "return_video", skip_evidence_check=False)
+        _assert_evidence(report, "return_video")

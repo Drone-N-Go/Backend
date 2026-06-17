@@ -158,14 +158,7 @@ async def _ensure_damage_report(
     return report
 
 
-def _assert_evidence(
-    report: DamageReport | None,
-    evidence_type: str,
-    skip_evidence_check: bool,
-) -> None:
-    if skip_evidence_check:
-        return
-
+def _assert_evidence(report: DamageReport | None, evidence_type: str) -> None:
     has_evidence = False
     if evidence_type == "pre_rental":
         has_evidence = bool(report and report.pre_rental_images)
@@ -366,6 +359,12 @@ async def get_passcode(
     booking = await _get_booking_or_404(booking_id, db)
     _assert_current_user_booking(booking, current_user)
 
+    if booking.status not in {"ready_for_pickup", "locker_opened"}:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Passcode is only available during the pickup flow.",
+        )
+
     if not booking.smiota_passcode:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -435,7 +434,7 @@ async def mark_case_verified(
 
 async def complete_before_photos(
     booking_id: str,
-    skip_evidence_check: bool,
+    _skip_evidence_check: bool,
     current_user: User,
     db: AsyncSession,
 ) -> Booking:
@@ -443,7 +442,7 @@ async def complete_before_photos(
     _assert_current_user_booking(booking, current_user)
     if booking.status != "before_photos_complete":
         report = await _get_damage_report(booking_id, db)
-        _assert_evidence(report, "pre_rental", skip_evidence_check)
+        _assert_evidence(report, "pre_rental")
     return await _advance_and_flush(booking, "before_photos_complete", db)
 
 
@@ -474,7 +473,7 @@ async def mark_return_case_verified(
 
 async def complete_after_photos(
     booking_id: str,
-    skip_evidence_check: bool,
+    _skip_evidence_check: bool,
     current_user: User,
     db: AsyncSession,
 ) -> Booking:
@@ -482,7 +481,7 @@ async def complete_after_photos(
     _assert_current_user_booking(booking, current_user)
     if booking.status != "after_photos_complete":
         report = await _get_damage_report(booking_id, db)
-        _assert_evidence(report, "post_rental", skip_evidence_check)
+        _assert_evidence(report, "post_rental")
     return await _advance_and_flush(booking, "after_photos_complete", db)
 
 
@@ -496,7 +495,7 @@ async def mark_return_locker_opened(
 
 async def complete_return_video(
     booking_id: str,
-    skip_evidence_check: bool,
+    _skip_evidence_check: bool,
     current_user: User,
     db: AsyncSession,
 ) -> Booking:
@@ -504,7 +503,7 @@ async def complete_return_video(
     _assert_current_user_booking(booking, current_user)
     if booking.status != "return_video_complete":
         report = await _get_damage_report(booking_id, db)
-        _assert_evidence(report, "return_video", skip_evidence_check)
+        _assert_evidence(report, "return_video")
     return await _advance_and_flush(booking, "return_video_complete", db)
 
 

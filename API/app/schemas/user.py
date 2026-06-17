@@ -27,7 +27,7 @@ class UserBase(BaseModel):
 # ---------------------------------------------------------------------------
 
 class UserRegisterRequest(UserBase):
-    password: str = Field(..., min_length=6)
+    password: str = Field(..., min_length=8, description="Minimum 8 characters")
 
 
 class UserLoginRequest(BaseModel):

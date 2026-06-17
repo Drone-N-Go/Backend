@@ -4,6 +4,7 @@ from unittest import IsolatedAsyncioTestCase, TestCase
 from unittest.mock import AsyncMock, Mock, patch
 
 from fastapi import HTTPException
+from pydantic import ValidationError
 
 os.environ.setdefault("APP_ENV", "test")
 os.environ.setdefault("DATABASE_URL", "postgresql://user:pass@localhost:5432/dronengo_test")
@@ -24,10 +25,30 @@ from app.core.admin_permissions import (
 from app.core.dependencies import AdminContext
 from app.models.admin_profile import AdminProfile
 from app.schemas.admin import LockerCurrentStateResponse
+from app.schemas.admin import OwnerSetupRequest, StaffCreateRequest
 from app.services import admin_service
 
 
 class AdminPermissionTests(TestCase):
+    def test_owner_setup_rejects_short_password(self):
+        with self.assertRaises(ValidationError):
+            OwnerSetupRequest(
+                email="owner@example.com",
+                password="1234567",
+                first_name="Owner",
+                last_name="User",
+            )
+
+    def test_staff_create_rejects_short_password(self):
+        with self.assertRaises(ValidationError):
+            StaffCreateRequest(
+                email="staff@example.com",
+                password="1234567",
+                first_name="Staff",
+                last_name="User",
+                role=ADMIN,
+            )
+
     def test_owner_and_master_developer_have_money_and_owner_management(self):
         for role in (OWNER, MASTER_DEVELOPER):
             self.assertTrue(role_has_capability(role, VIEW_MONEY))
