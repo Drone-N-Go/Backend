@@ -98,6 +98,7 @@ async def process_smiota_webhook(
         tracking_id=body.trackingID,
         raw_payload=body.model_dump(),
         processed=False,
+        processing_status="received",
     )
     db.add(event)
     await db.flush()
@@ -114,6 +115,10 @@ async def process_smiota_webhook(
             body.objectId,
             body.notification_type,
         )
+        event.processing_status = "unmatched"
+        event.error_message = "No matching booking found for this Smiota object ID."
+        db.add(event)
+        await db.flush()
         return SmiotaWebhookResponse(
             status="received",
             message="No matching booking found for this Smiota object ID.",
@@ -128,6 +133,8 @@ async def process_smiota_webhook(
                 booking.status,
             )
             event.processed = True
+            event.processing_status = "ignored"
+            event.error_message = "Booking is no longer awaiting pickup."
             db.add(event)
             await db.flush()
             return SmiotaWebhookResponse(
@@ -139,6 +146,8 @@ async def process_smiota_webhook(
         if booking.status == "ready_for_pickup" and booking.smiota_passcode:
             logger.info("Duplicate PackageDeposited ignored for booking %s", booking.id)
             event.processed = True
+            event.processing_status = "ignored"
+            event.error_message = "Duplicate deposit event ignored."
             db.add(event)
             await db.flush()
             return SmiotaWebhookResponse(
@@ -209,14 +218,57 @@ async def process_smiota_webhook(
 
     else:
         logger.warning("Unrecognized Smiota notification_type: %s", body.notification_type)
+        event.error_message = f"Unrecognized notification_type: {body.notification_type}"
 
     # 4. Mark event as processed
     event.processed = True
+    event.processing_status = "processed" if not event.error_message else "failed"
     db.add(event)
     await db.flush()
+
+    if event.processing_status == "failed":
+        return SmiotaWebhookResponse(
+            status="failed",
+            message=event.error_message or f"Event '{body.notification_type}' failed.",
+            booking_id=booking.id,
+        )
 
     return SmiotaWebhookResponse(
         status="processed",
         message=f"Event '{body.notification_type}' handled successfully.",
         booking_id=booking.id,
     )
+
+
+async def record_smiota_webhook_failure(
+    raw_payload: dict | None,
+    db: AsyncSession,
+    *,
+    status_value: str,
+    error_message: str,
+) -> None:
+    """
+    Persist webhook attempts that fail before normal business processing.
+
+    The normal FastAPI dependency rolls back on raised HTTPException, so this
+    helper commits immediately before the route re-raises the original error.
+    """
+    payload = raw_payload or {}
+
+    def optional_str(value):
+        return None if value is None else str(value)
+
+    event = SmiotaEvent(
+        notification_type=str(payload.get("notification_type") or "InvalidWebhook"),
+        object_id=str(payload.get("objectId") or payload.get("object_id") or "unknown"),
+        locker_name=optional_str(payload.get("lockerName") or payload.get("locker_name")),
+        passcode=optional_str(payload.get("passcode")),
+        courier_code=optional_str(payload.get("courierCode") or payload.get("courier_code")),
+        tracking_id=optional_str(payload.get("trackingID") or payload.get("tracking_id")),
+        raw_payload=payload,
+        processed=False,
+        processing_status=status_value,
+        error_message=error_message[:500],
+    )
+    db.add(event)
+    await db.commit()

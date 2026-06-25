@@ -102,6 +102,9 @@ class SmiotaEventSummary(BaseModel):
     locker_name: Optional[str]
     courier_code: Optional[str]
     tracking_id: Optional[str]
+    processed: bool
+    processing_status: str
+    error_message: Optional[str]
     created_at: datetime
 
 

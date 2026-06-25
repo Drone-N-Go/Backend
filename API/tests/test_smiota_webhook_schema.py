@@ -55,6 +55,19 @@ class SmiotaWebhookSchemaTests(TestCase):
         self.assertEqual(event.tracking_id, "TRK-9876543210")
         self.assertEqual(event.raw_payload["trackingID"], "TRK-9876543210")
 
+    def test_event_model_tracks_processing_status_and_error_message(self):
+        event = SmiotaEvent(
+            notification_type="PackageDeposited",
+            object_id="smiota-obj-abc123",
+            raw_payload={"objectId": "smiota-obj-abc123"},
+            processed=False,
+            processing_status="failed",
+            error_message="Invalid API key.",
+        )
+
+        self.assertEqual(event.processing_status, "failed")
+        self.assertEqual(event.error_message, "Invalid API key.")
+
 
 class SmiotaBasicAuthTests(TestCase):
     def assert_unauthorized(self, authorization: str | None):

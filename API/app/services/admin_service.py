@@ -489,6 +489,9 @@ def _event_summary(event: SmiotaEvent | None) -> SmiotaEventSummary | None:
         locker_name=event.locker_name,
         courier_code=event.courier_code,
         tracking_id=event.tracking_id,
+        processed=event.processed,
+        processing_status=event.processing_status,
+        error_message=event.error_message,
         created_at=event.created_at,
     )
 

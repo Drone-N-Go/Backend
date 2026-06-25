@@ -29,6 +29,10 @@ class SmiotaEvent(Base):
     tracking_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     raw_payload: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     processed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    processing_status: Mapped[str] = mapped_column(
+        String(30), nullable=False, default="received", server_default="received"
+    )
+    error_message: Mapped[str | None] = mapped_column(String(500), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
