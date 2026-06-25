@@ -1,5 +1,5 @@
 import base64
-from unittest import TestCase
+from unittest import IsolatedAsyncioTestCase, TestCase
 from unittest.mock import patch
 
 from fastapi import HTTPException
@@ -100,3 +100,62 @@ class SmiotaBasicAuthTests(TestCase):
     def test_rejects_wrong_api_key(self):
         with patch.object(webhook_service.settings, "smiota_api_key", "correct-api-key"):
             self.assert_unauthorized(basic_auth_header("wrong-key:"))
+
+
+class FakeAuditSession:
+    def __init__(self):
+        self.added = []
+        self.committed = False
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    def add(self, event):
+        self.added.append(event)
+
+    async def commit(self):
+        self.committed = True
+
+
+class SmiotaWebhookAuditTests(IsolatedAsyncioTestCase):
+    async def test_failure_audit_uses_independent_session_and_commits(self):
+        audit_session = FakeAuditSession()
+
+        with patch.object(webhook_service, "AsyncSessionLocal", return_value=audit_session):
+            await webhook_service.record_smiota_webhook_failure(
+                {
+                    "notification_type": "PackageDeposited",
+                    "objectId": "smiota-obj-abc123",
+                    "lockerName": "Locker-A3",
+                    "trackingID": "TRK-9876543210",
+                },
+                status_value="auth_failed",
+                error_message="Invalid API key.",
+            )
+
+        self.assertTrue(audit_session.committed)
+        self.assertEqual(len(audit_session.added), 1)
+        event = audit_session.added[0]
+        self.assertEqual(event.notification_type, "PackageDeposited")
+        self.assertEqual(event.object_id, "smiota-obj-abc123")
+        self.assertEqual(event.processing_status, "auth_failed")
+        self.assertEqual(event.error_message, "Invalid API key.")
+
+    async def test_failure_audit_preserves_malformed_payload_as_visible_row(self):
+        audit_session = FakeAuditSession()
+
+        with patch.object(webhook_service, "AsyncSessionLocal", return_value=audit_session):
+            await webhook_service.record_smiota_webhook_failure(
+                {"payload": ["not", "a", "smiota", "object"]},
+                status_value="failed",
+                error_message="Invalid webhook payload.",
+            )
+
+        event = audit_session.added[0]
+        self.assertEqual(event.notification_type, "InvalidWebhook")
+        self.assertEqual(event.object_id, "unknown")
+        self.assertEqual(event.processing_status, "failed")
+        self.assertEqual(event.raw_payload, {"payload": ["not", "a", "smiota", "object"]})

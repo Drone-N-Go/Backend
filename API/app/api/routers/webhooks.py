@@ -41,7 +41,6 @@ async def smiota_webhook(
         raw_payload = {"_parse_error": "Invalid JSON body."}
         await record_smiota_webhook_failure(
             raw_payload,
-            db,
             status_value="failed",
             error_message=f"Invalid JSON body: {exc}",
         )
@@ -55,7 +54,6 @@ async def smiota_webhook(
     except HTTPException as exc:
         await record_smiota_webhook_failure(
             raw_payload,
-            db,
             status_value="auth_failed",
             error_message=str(exc.detail),
         )
@@ -66,7 +64,6 @@ async def smiota_webhook(
     except ValidationError as exc:
         await record_smiota_webhook_failure(
             raw_payload,
-            db,
             status_value="failed",
             error_message=str(exc),
         )

@@ -12,6 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
+from app.db.session import AsyncSessionLocal
 from app.models.booking import Booking
 from app.models.drone import Drone
 from app.models.locker_unit import LockerUnit
@@ -102,6 +103,13 @@ async def process_smiota_webhook(
     )
     db.add(event)
     await db.flush()
+    logger.info(
+        "Smiota webhook audit row created | event_id=%s type=%s object_id=%s status=%s",
+        event.id,
+        event.notification_type,
+        event.object_id,
+        event.processing_status,
+    )
 
     # 2. Find matching booking via smiota_object_id
     booking_result = await db.execute(
@@ -242,7 +250,6 @@ async def process_smiota_webhook(
 
 async def record_smiota_webhook_failure(
     raw_payload: dict | None,
-    db: AsyncSession,
     *,
     status_value: str,
     error_message: str,
@@ -250,8 +257,8 @@ async def record_smiota_webhook_failure(
     """
     Persist webhook attempts that fail before normal business processing.
 
-    The normal FastAPI dependency rolls back on raised HTTPException, so this
-    helper commits immediately before the route re-raises the original error.
+    This uses an independent session so a 401/422 response from the webhook
+    request cannot roll back the audit trail.
     """
     payload = raw_payload or {}
 
@@ -270,5 +277,13 @@ async def record_smiota_webhook_failure(
         processing_status=status_value,
         error_message=error_message[:500],
     )
-    db.add(event)
-    await db.commit()
+    async with AsyncSessionLocal() as audit_db:
+        audit_db.add(event)
+        await audit_db.commit()
+    logger.info(
+        "Smiota webhook failure audited | type=%s object_id=%s status=%s error=%s",
+        event.notification_type,
+        event.object_id,
+        event.processing_status,
+        event.error_message,
+    )
