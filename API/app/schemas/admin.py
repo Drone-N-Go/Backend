@@ -100,6 +100,7 @@ class SmiotaEventSummary(BaseModel):
     notification_type: str
     object_id: str
     locker_name: Optional[str]
+    passcode: Optional[str]
     courier_code: Optional[str]
     tracking_id: Optional[str]
     processed: bool

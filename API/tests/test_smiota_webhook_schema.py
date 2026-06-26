@@ -1,4 +1,5 @@
 import base64
+from datetime import datetime, timezone
 from unittest import IsolatedAsyncioTestCase, TestCase
 from unittest.mock import patch
 
@@ -6,7 +7,7 @@ from fastapi import HTTPException
 
 from app.models.smiota_event import SmiotaEvent
 from app.schemas.webhook import SmiotaWebhookRequest
-from app.services import webhook_service
+from app.services import admin_service, webhook_service
 
 
 class RequestStub:
@@ -67,6 +68,22 @@ class SmiotaWebhookSchemaTests(TestCase):
 
         self.assertEqual(event.processing_status, "failed")
         self.assertEqual(event.error_message, "Invalid API key.")
+
+    def test_admin_event_summary_exposes_passcode_for_authenticated_admins(self):
+        event = SmiotaEvent(
+            id="event-id",
+            notification_type="PackageDeposited",
+            object_id="smiota-obj-abc123",
+            passcode="849201",
+            raw_payload={"passcode": "849201"},
+            processed=True,
+            processing_status="processed",
+            created_at=datetime.now(timezone.utc),
+        )
+
+        summary = admin_service._event_summary(event)
+
+        self.assertEqual(summary.passcode, "849201")
 
 
 class SmiotaBasicAuthTests(TestCase):
