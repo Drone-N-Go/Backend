@@ -1,6 +1,9 @@
 # Deployment Guide — Render + Supabase
 
 This API is deployed as a Render web service. Supabase provides PostgreSQL only.
+User-facing apps must keep database access routed through this backend API. Do
+not add direct Supabase table access from clients unless least-privilege RLS
+policies are designed and tested for those exact tables.
 
 ## 1. Create Supabase Postgres
 
@@ -72,4 +75,26 @@ where conrelid = 'admin_profiles'::regclass
   and conname = 'ck_admin_profiles_role';
 ```
 
-Expected roles: `owner`, `master_developer`, `manager`, `developer`, and `admin`. If any are missing, deploy and run Alembic revision `20260612_0004`, which recreates the constraint. Current startup verification expects Alembic head `20260612_0005`, including the case QR token table.
+Expected roles: `owner`, `master_developer`, `manager`, `developer`, and `admin`. If any are missing, deploy and run Alembic revision `20260612_0004`, which recreates the constraint. Current startup verification expects Alembic head `20260714_0009`, including public-schema Row Level Security remediation.
+
+### Supabase Security Advisor
+
+The `rls_disabled_in_public` finding is remediated by Alembic revision
+`20260714_0009`. It dynamically enables Row Level Security for every regular or
+partitioned table in the exposed `public` schema without adding `anon` policies,
+broad `authenticated` policies, or `FORCE ROW LEVEL SECURITY`.
+
+After Render deploys the backend and runs `alembic upgrade head`, rerun the
+Supabase Security Advisor or verify manually:
+
+```sql
+select n.nspname as schema_name, c.relname as table_name
+from pg_class c
+join pg_namespace n on n.oid = c.relnamespace
+where n.nspname = 'public'
+  and c.relkind in ('r', 'p')
+  and c.relrowsecurity = false
+order by 1, 2;
+```
+
+Expected result: zero rows.

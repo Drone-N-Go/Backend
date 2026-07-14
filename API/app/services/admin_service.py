@@ -98,7 +98,7 @@ def _profile_response(profile: AdminProfile, assigned_location_ids: list[str] | 
         title=profile.title,
         phone=profile.phone,
         notes=profile.notes,
-        must_change_password=profile.must_change_password,
+        must_change_password=profile.must_change_password or False,
         created_at=profile.created_at,
         updated_at=profile.updated_at,
         user=UserResponse.model_validate(profile.user) if profile.user else None,
