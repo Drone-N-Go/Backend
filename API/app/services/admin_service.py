@@ -525,7 +525,7 @@ def _case_qr_response(token: CaseQRToken, drone: Drone) -> CaseQRTokenResponse:
         drone_id=token.drone_id,
         status=token.status,
         qr_payload=case_qr_payload_for_token(token),
-        label_title="DroneNGo Case Verification",
+        label_title="DroneAndGo Case Verification",
         label_subtitle=f"{drone.model_name} · {drone.serial_number}",
         drone=_drone_summary(drone),
     )

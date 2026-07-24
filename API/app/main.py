@@ -131,4 +131,4 @@ async def root():
 
 @app.get("/health", tags=["Health"], summary="Detailed health check")
 async def health():
-    return {"status": "ok", "service": "dronengo-backend"}
+    return {"status": "ok", "service": "droneandgo-backend"}

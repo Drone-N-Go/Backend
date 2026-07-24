@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: dronengo-api
+    name: droneandgo-api
     runtime: python
     rootDir: API
     buildCommand: pip install -r requirements.txt

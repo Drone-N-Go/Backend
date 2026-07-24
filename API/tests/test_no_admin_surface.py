@@ -4,7 +4,7 @@ from unittest import TestCase
 from fastapi import HTTPException
 
 os.environ.setdefault("APP_ENV", "test")
-os.environ.setdefault("DATABASE_URL", "postgresql://user:pass@localhost:5432/dronengo_test")
+os.environ.setdefault("DATABASE_URL", "postgresql://user:pass@localhost:5432/droneandgo_test")
 os.environ.setdefault("SECRET_KEY", "x" * 64)
 
 from app.main import app  # noqa: E402
