@@ -18,6 +18,7 @@ from app.models.booking import Booking
 from app.models.damage_report import DamageReport
 from app.models.drone import Drone
 from app.models.locker_location import LockerLocation
+from app.models.locker_unit import LockerUnit
 from app.models.user import User
 from app.core.booking_lifecycle import (
     BOOKING_STATUS_TIMESTAMP_FIELDS,
@@ -214,7 +215,16 @@ async def create_booking(
     # 3. Calculate cost
     total_cost = _calculate_cost(drone, body.rental_type, body.rental_duration)
 
-    # 4. Create booking
+    # 4. Look up whether this drone's locker already holds a passcode from a
+    #    restock deposit (see webhook_service._handle_restock_deposit) — if
+    #    so, this booking can go straight to "ready_for_pickup" since the
+    #    drone is already physically in the locker.
+    locker_unit_result = await db.execute(
+        select(LockerUnit).where(LockerUnit.current_drone_id == drone.id)
+    )
+    locker_unit = locker_unit_result.scalar_one_or_none()
+
+    # 5. Create booking
     booking = Booking(
         user_id=current_user.id,
         drone_id=body.drone_id,
@@ -225,9 +235,24 @@ async def create_booking(
         total_cost=total_cost,
         status="reserved",
     )
+
+    if locker_unit and locker_unit.current_passcode:
+        metadata = locker_unit.smiota_metadata or {}
+        booking.smiota_passcode = locker_unit.current_passcode
+        booking.smiota_locker_name = locker_unit.smiota_locker_name
+        booking.smiota_courier_code = metadata.get("pending_deposit_courier_code")
+        booking.smiota_object_id = metadata.get("pending_deposit_object_id")
+        booking.status = "ready_for_pickup"
+        booking.ready_for_pickup_at = datetime.now(timezone.utc)
+        logger.info(
+            "Booking for drone %s created ready-for-pickup — passcode already held on locker %s",
+            drone.id,
+            locker_unit.id,
+        )
+
     db.add(booking)
 
-    # 5. Mark drone as rented (reserved)
+    # 6. Mark drone as rented (reserved)
     drone.status = "rented"
     db.add(drone)
 

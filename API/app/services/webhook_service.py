@@ -75,6 +75,104 @@ def verify_smiota_auth(request: Request) -> None:
 
 
 # --------------------------------------------------------------------------- #
+# Restock handling (PackageDeposited with no pre-existing booking)
+# --------------------------------------------------------------------------- #
+
+async def _handle_restock_deposit(
+    body: SmiotaWebhookRequest, event: SmiotaEvent, db: AsyncSession
+) -> SmiotaWebhookResponse:
+    """
+    A PackageDeposited event that doesn't match any existing booking means a
+    drone is being stocked into a locker ahead of any reservation. Resolve
+    the LockerUnit by lockerName, mark its assigned drone available, and hold
+    the passcode + Smiota object/courier ids on the LockerUnit so
+    create_booking() can attach them to whichever booking claims this drone.
+    """
+    if not body.lockerName:
+        logger.warning(
+            "PackageDeposited with no matching booking and no lockerName; cannot resolve locker. object_id=%s",
+            body.objectId,
+        )
+        event.processing_status = "unmatched"
+        event.error_message = "No matching booking and no lockerName to resolve a restock target."
+        db.add(event)
+        await db.flush()
+        return SmiotaWebhookResponse(
+            status="received",
+            message="No matching booking and no lockerName; event recorded only.",
+        )
+
+    unit_result = await db.execute(
+        select(LockerUnit).where(LockerUnit.smiota_locker_name == body.lockerName)
+    )
+    unit = unit_result.scalar_one_or_none()
+
+    if not unit:
+        logger.warning(
+            "PackageDeposited restock for unknown locker_name=%s object_id=%s",
+            body.lockerName,
+            body.objectId,
+        )
+        event.processing_status = "unmatched"
+        event.error_message = f"No locker unit found for lockerName '{body.lockerName}'."
+        db.add(event)
+        await db.flush()
+        return SmiotaWebhookResponse(
+            status="received",
+            message="No locker unit found for this lockerName; event recorded only.",
+        )
+
+    unit.current_passcode = body.passcode
+    unit.smiota_metadata = {
+        **(unit.smiota_metadata or {}),
+        "pending_deposit_object_id": body.objectId,
+        "pending_deposit_courier_code": body.courierCode,
+    }
+    db.add(unit)
+
+    drone = None
+    if unit.current_drone_id:
+        drone_result = await db.execute(select(Drone).where(Drone.id == unit.current_drone_id))
+        drone = drone_result.scalar_one_or_none()
+
+    if drone:
+        if drone.status == "damaged":
+            logger.warning(
+                "PackageDeposited for damaged drone %s in locker %s — leaving status as damaged.",
+                drone.id,
+                unit.id,
+            )
+        else:
+            drone.status = "available"
+            db.add(drone)
+            logger.info(
+                "PackageDeposited — drone %s marked available (restock, locker %s)",
+                drone.id,
+                unit.id,
+            )
+    else:
+        logger.warning(
+            "PackageDeposited — locker %s (name=%s) has no drone assigned; passcode stored but no drone marked available.",
+            unit.id,
+            body.lockerName,
+        )
+
+    event.processed = True
+    event.processing_status = "processed"
+    db.add(event)
+    await db.flush()
+
+    return SmiotaWebhookResponse(
+        status="processed",
+        message=(
+            "Restock deposit processed; drone marked available."
+            if drone
+            else "Deposit recorded; no drone assigned to this locker yet."
+        ),
+    )
+
+
+# --------------------------------------------------------------------------- #
 # Webhook processing
 # --------------------------------------------------------------------------- #
 
@@ -85,7 +183,15 @@ async def process_smiota_webhook(
     Process an incoming Smiota webhook event.
 
     Supported notification_type values:
-      - PackageDeposited : Drone placed in locker → store passcode and mark ready for pickup
+      - PackageDeposited : Drone placed in locker.
+          * If an existing booking references this objectId (drone was already
+            reserved and is being fulfilled), store the passcode on that
+            booking and mark it ready for pickup.
+          * If no booking references this objectId yet, this is a *restock*
+            event — staff loaded a drone into a locker ahead of any
+            reservation. Resolve the locker by lockerName, mark its assigned
+            drone available, and hold the passcode on the LockerUnit until a
+            customer books it (see create_booking(), which reads it back).
       - PackagePickedUp  : User picked up drone → audit only; iOS drives verification states
     """
 
@@ -118,6 +224,9 @@ async def process_smiota_webhook(
     booking = booking_result.scalar_one_or_none()
 
     if not booking:
+        if body.notification_type == "PackageDeposited":
+            return await _handle_restock_deposit(body, event, db)
+
         logger.warning(
             "Smiota event received for unknown objectId: %s (type: %s)",
             body.objectId,
