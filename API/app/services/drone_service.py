@@ -11,6 +11,7 @@ from sqlalchemy.orm import selectinload
 
 from app.models.drone import Drone
 from app.models.drone_favorite import DroneFavorite
+from app.models.locker_unit import LockerUnit
 from app.models.user import User
 from app.schemas.drone import (
     AssignedLocationSummary,
@@ -86,6 +87,15 @@ async def list_drones(
     if status_filter:
         query = query.where(Drone.status == status_filter)
         count_query = count_query.where(Drone.status == status_filter)
+        if status_filter == "available":
+            # "available" alone only means the row's status column says so -
+            # it does NOT mean the drone is physically sitting in a locker
+            # right now (status defaults to "available" at creation). Require
+            # a live LockerUnit deposit too, so only genuinely-deposited
+            # drones are offered for rental.
+            deposited = select(LockerUnit.id).where(LockerUnit.current_drone_id == Drone.id)
+            query = query.where(deposited.exists())
+            count_query = count_query.where(deposited.exists())
     if location_id:
         query = query.where(Drone.assigned_locker_location_id == location_id)
         count_query = count_query.where(Drone.assigned_locker_location_id == location_id)

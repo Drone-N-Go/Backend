@@ -571,6 +571,22 @@ async def complete_return(
     if drone:
         db.add(drone)
 
+    # Defensive cleanup: this method does not know which physical locker
+    # (if any) the drone was actually dropped back into — that only becomes
+    # known from a real future PackageDeposited webhook, same as first-time
+    # intake. So never set LockerUnit.current_drone_id here. Just make sure
+    # no LockerUnit is left stale, claiming this drone as "currently
+    # deposited" when it has just been returned outside of that flow (e.g.
+    # a drone picked up before the PackagePickedUp fix shipped).
+    if booking.drone_id:
+        stale_units = await db.execute(
+            select(LockerUnit).where(LockerUnit.current_drone_id == booking.drone_id)
+        )
+        for stale_unit in stale_units.scalars().all():
+            stale_unit.current_drone_id = None
+            stale_unit.current_passcode = None
+            db.add(stale_unit)
+
     await db.flush()
     logger.info("Booking returned: %s", booking_id)
     return booking

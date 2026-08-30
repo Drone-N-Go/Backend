@@ -325,6 +325,13 @@ async def process_smiota_webhook(
             unit = unit_result.scalar_one_or_none()
             if unit:
                 unit.current_passcode = None
+                # Drone has physically left this locker — clear the FK so
+                # list_drones()'s "genuinely deposited" check stops treating
+                # it as still present. It will be reassigned to a locker
+                # (this one or another) only by a future real
+                # PackageDeposited webhook, not implicitly.
+                unit.current_drone_id = None
+                unit.status = "available"
                 db.add(unit)
 
         logger.info(
