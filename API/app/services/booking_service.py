@@ -80,7 +80,18 @@ def booking_response(booking: Booking, favorite_ids: set[str] | None = None) -> 
         }
 
     report = booking.damage_report
-    response = BookingResponse.model_validate(booking)
+    # Validate from the raw column values only — NOT the ORM object itself.
+    # `Booking.drone`/`Booking.location` are SQLAlchemy relationships that
+    # resolve to `Drone`/`LockerLocation` instances, but `BookingResponse`
+    # declares those fields as `dict[str, Any]`. Calling
+    # `BookingResponse.model_validate(booking)` directly makes Pydantic try
+    # to validate those ORM objects against a plain-dict type and raise a
+    # ValidationError (uncaught -> 500) on every booking that has a drone or
+    # location attached, i.e. every real booking. Building from just the
+    # table's columns sidesteps the relationship attributes entirely; the
+    # drone/location/evidence fields are set explicitly below as before.
+    column_data = {c.name: getattr(booking, c.name) for c in Booking.__table__.columns}
+    response = BookingResponse.model_validate(column_data)
     response.drone = _drone_response(booking.drone, favorite_ids).model_dump(mode="json") if booking.drone else None
     response.location = location
     response.pre_rental_images = list(report.pre_rental_images or []) if report else []
