@@ -6,7 +6,7 @@ Business logic for the full drone booking lifecycle:
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 from fastapi import HTTPException, status
@@ -23,6 +23,8 @@ from app.models.user import User
 from app.core.booking_lifecycle import (
     BOOKING_STATUS_TIMESTAMP_FIELDS,
     BOOKING_TRANSITIONS,
+    CANCELLATION_FREE_WINDOW_HOURS,
+    CANCELLATION_GRACE_PERIOD_HOURS,
     TERMINAL_BOOKING_STATUSES,
 )
 from app.schemas.booking import (
@@ -97,6 +99,9 @@ def booking_response(booking: Booking, favorite_ids: set[str] | None = None) -> 
     response.pre_rental_images = list(report.pre_rental_images or []) if report else []
     response.post_rental_images = list(report.post_rental_images or []) if report else []
     response.return_video_url = report.return_video_url if report else None
+    response.is_cancellable = (
+        booking.status not in TERMINAL_BOOKING_STATUSES and _is_cancellable(booking)
+    )
     return response
 
 
@@ -112,6 +117,61 @@ def _calculate_cost(drone: Drone, rental_type: str, duration: int) -> Decimal:
     if rental_type == "hourly":
         return Decimal(str(drone.hourly_rate)) * duration
     return Decimal(str(drone.daily_rate)) * duration
+
+
+def _parse_pickup_time(pickup_time: str) -> datetime | None:
+    """Best-effort parse of the free-form `pickup_time` string column.
+
+    `pickup_time` is stored as a plain String(50), not a DateTime column (see
+    app/models/booking.py) — the API contract documents it as an ISO 8601
+    string but nothing enforces that at the DB layer. Returns None on any
+    parse failure so callers can fail safe rather than 500 on bad data.
+    """
+    try:
+        # datetime.fromisoformat() only accepts a trailing 'Z' from Python
+        # 3.11 onward; this backend targets 3.10 in some environments (no
+        # pinned runtime version — see render.yaml), so normalize it first
+        # rather than assume a newer stdlib.
+        normalized = pickup_time.strip()
+        if normalized.endswith("Z"):
+            normalized = normalized[:-1] + "+00:00"
+        parsed = datetime.fromisoformat(normalized)
+    except (TypeError, ValueError, AttributeError):
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def _is_cancellable(booking: Booking) -> bool:
+    """Whether `booking` can still be cancelled online right now.
+
+    Rule (confirmed with product 2026-09-01, for the web booking-cancel flow):
+      - A booking whose pickup is at least CANCELLATION_FREE_WINDOW_HOURS away
+        can always be cancelled.
+      - A booking whose pickup is already inside that window (i.e. it was
+        booked last-minute) can still be cancelled, but only within
+        CANCELLATION_GRACE_PERIOD_HOURS of when it was *created* — after that
+        it's locked in.
+    Terminal bookings (already returned/cancelled) are never cancellable;
+    callers that also need that check should test TERMINAL_BOOKING_STATUSES
+    separately since this helper only evaluates the time-window rule.
+    """
+    now = datetime.now(timezone.utc)
+
+    pickup_dt = _parse_pickup_time(booking.pickup_time)
+    if pickup_dt is None:
+        # Can't evaluate the window on unparseable data — fail open rather
+        # than trap a user with a booking they can never cancel.
+        return True
+
+    if pickup_dt - now >= timedelta(hours=CANCELLATION_FREE_WINDOW_HOURS):
+        return True
+
+    created_at = booking.created_at
+    if created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=timezone.utc)
+    return now - created_at <= timedelta(hours=CANCELLATION_GRACE_PERIOD_HOURS)
 
 
 def _stamp_status_timestamp(booking: Booking, new_status: str) -> None:
@@ -203,6 +263,21 @@ async def _advance_and_flush(
 async def create_booking(
     body: BookingCreateRequest, current_user: User, db: AsyncSession
 ) -> Booking:
+    # 0. Enforce one active (non-terminal) reservation per user. Matches
+    #    the client-side rule the consumer apps already assume; enforced
+    #    here so it can't be bypassed by calling the API directly.
+    active_result = await db.execute(
+        select(Booking).where(
+            Booking.user_id == current_user.id,
+            Booking.status.notin_(TERMINAL_BOOKING_STATUSES),
+        )
+    )
+    if active_result.scalars().first() is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="You already have an active reservation. Return or cancel it before booking another drone.",
+        )
+
     # 1. Validate drone
     drone_result = await db.execute(select(Drone).where(Drone.id == body.drone_id))
     drone = drone_result.scalar_one_or_none()
@@ -283,7 +358,11 @@ async def list_bookings(
     skip: int = 0,
     limit: int = 50,
 ) -> BookingListResponse:
-    query = select(Booking)
+    query = select(Booking).options(
+        selectinload(Booking.drone).selectinload(Drone.assigned_location),
+        selectinload(Booking.location),
+        selectinload(Booking.damage_report),
+    )
     count_query = select(func.count()).select_from(Booking)
 
     query = query.where(Booking.user_id == current_user.id)
@@ -298,8 +377,15 @@ async def list_bookings(
         await db.execute(query.order_by(Booking.created_at.desc()).offset(skip).limit(limit))
     ).scalars().all()
 
+    # Bug fix (2026-09-01): this previously called BookingResponse.model_validate(b)
+    # directly on the ORM object, which raises a Pydantic ValidationError (-> 500)
+    # on any booking with a drone/location attached, same class of bug already
+    # fixed in booking_response() itself (see that function's docstring) — this
+    # call site had just never been updated to use it. Also added the missing
+    # eager-loading above so drone/location/damage_report are actually populated
+    # here instead of triggering an async lazy-load error.
     return BookingListResponse(
-        items=[BookingResponse.model_validate(b) for b in bookings],
+        items=[booking_response(b) for b in bookings],
         total=total,
         skip=skip,
         limit=limit,
@@ -429,6 +515,16 @@ async def cancel_booking(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Cannot cancel a booking with status '{booking.status}'.",
+        )
+
+    if not _is_cancellable(booking):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "This booking can no longer be cancelled online — pickup is within "
+                f"{CANCELLATION_FREE_WINDOW_HOURS} hours and the "
+                f"{CANCELLATION_GRACE_PERIOD_HOURS}-hour cancellation grace period has passed."
+            ),
         )
 
     booking.status = "cancelled"

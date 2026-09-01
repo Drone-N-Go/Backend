@@ -34,6 +34,14 @@ BOOKING_TRANSITIONS = {
     "returned": "return_video_complete",
 }
 
+# Cancellation window rule (added 2026-09-01 for web booking-cancel support):
+# - If pickup is at least this many hours away, cancellation is always free.
+CANCELLATION_FREE_WINDOW_HOURS = 24
+# - If pickup is already within the free window (a last-minute booking),
+#   the user still gets this many hours from booking creation to cancel
+#   penalty-free before the booking is locked in.
+CANCELLATION_GRACE_PERIOD_HOURS = 2
+
 BOOKING_STATUS_TIMESTAMP_FIELDS = {
     "ready_for_pickup": "ready_for_pickup_at",
     "locker_opened": "locker_opened_at",
