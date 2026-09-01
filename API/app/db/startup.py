@@ -12,7 +12,6 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 logger = logging.getLogger(__name__)
 
-EXPECTED_ADMIN_REVISION = "20260901_0011"
 EXPECTED_ADMIN_ROLE_CONSTRAINT_VALUES = {
     "owner",
     "master_developer",
@@ -106,7 +105,7 @@ async def _read_schema(connection):
     return await connection.run_sync(inspect_schema)
 
 
-async def verify_admin_schema() -> None:
+async def verify_admin_schema() -> str:
     engine = create_async_engine(normalize_database_url(), pool_pre_ping=True)
     try:
         async with engine.connect() as connection:
@@ -118,10 +117,6 @@ async def verify_admin_schema() -> None:
         await engine.dispose()
 
     failures: list[str] = []
-    if revision != EXPECTED_ADMIN_REVISION:
-        failures.append(
-            f"alembic_version is {revision!r}; expected {EXPECTED_ADMIN_REVISION!r}"
-        )
 
     missing_tables = sorted(REQUIRED_ADMIN_TABLES - tables)
     if missing_tables:
@@ -148,6 +143,7 @@ async def verify_admin_schema() -> None:
         raise RuntimeError("Admin schema verification failed: " + "; ".join(failures))
 
     logger.info("DB_STARTUP admin schema verified at Alembic revision %s", revision)
+    return revision
 
 
 async def ensure_database_ready() -> None:

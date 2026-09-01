@@ -6,13 +6,13 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from app.db.startup import EXPECTED_ADMIN_REVISION, verify_admin_schema
+from app.db.startup import verify_admin_schema
 
 
 def main() -> int:
     try:
-        asyncio.run(verify_admin_schema())
-        print(f"Admin schema verified at Alembic revision {EXPECTED_ADMIN_REVISION}.")
+        revision = asyncio.run(verify_admin_schema())
+        print(f"Admin schema verified at Alembic revision {revision}.")
     except Exception as exc:
         print(str(exc), file=sys.stderr)
         return 1
