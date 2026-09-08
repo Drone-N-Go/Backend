@@ -25,6 +25,8 @@ from app.core.booking_lifecycle import (
     BOOKING_TRANSITIONS,
     CANCELLATION_FREE_WINDOW_HOURS,
     CANCELLATION_GRACE_PERIOD_HOURS,
+    NO_SHOW_REPEAT_THRESHOLD,
+    NO_SHOW_REPEAT_WINDOW_DAYS,
     TERMINAL_BOOKING_STATUSES,
 )
 from app.schemas.booking import (
@@ -48,7 +50,7 @@ async def _get_booking_or_404(booking_id: str, db: AsyncSession) -> Booking:
     booking = result.scalar_one_or_none()
     if not booking:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found.")
-    return booking
+    return await _auto_expire_if_overdue(booking, db)
 
 
 async def _get_booking_detail_or_404(booking_id: str, db: AsyncSession) -> Booking:
@@ -64,7 +66,7 @@ async def _get_booking_detail_or_404(booking_id: str, db: AsyncSession) -> Booki
     booking = result.scalar_one_or_none()
     if not booking:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found.")
-    return booking
+    return await _auto_expire_if_overdue(booking, db)
 
 
 def booking_response(booking: Booking, favorite_ids: set[str] | None = None) -> BookingResponse:
@@ -102,6 +104,7 @@ def booking_response(booking: Booking, favorite_ids: set[str] | None = None) -> 
     response.is_cancellable = (
         booking.status not in TERMINAL_BOOKING_STATUSES and _is_cancellable(booking)
     )
+    response.is_surrenderable = _is_overdue_never_picked_up(booking)
     return response
 
 
@@ -172,6 +175,95 @@ def _is_cancellable(booking: Booking) -> bool:
     if created_at.tzinfo is None:
         created_at = created_at.replace(tzinfo=timezone.utc)
     return now - created_at <= timedelta(hours=CANCELLATION_GRACE_PERIOD_HOURS)
+
+
+# --------------------------------------------------------------------------- #
+# Surrender / no-show (never picked up before the return deadline passed)
+# --------------------------------------------------------------------------- #
+
+# Statuses in which the drone was never actually removed from the locker —
+# the user scanned nothing and opened nothing. `_is_cancellable`/cancel_booking
+# already cover the voluntary-cancel path; this is the separate "you never
+# showed up and now it's overdue" path, which cancel_booking deliberately
+# blocks once the pickup window rule locks a booking in.
+NEVER_PICKED_UP_STATUSES = ("reserved", "ready_for_pickup")
+
+
+def _compute_return_deadline(booking: Booking) -> datetime | None:
+    """When this booking's rental window ends, or None if pickup_time can't
+    be parsed (see _parse_pickup_time's docstring re: the loose String(50)
+    column). Mirrors the client-side dropOffTime math in APIDTOs.swift
+    (pickup_time + rental_duration, in hours for "hourly" / days for "daily")
+    so the server and app agree on when a booking becomes overdue.
+    """
+    pickup_dt = _parse_pickup_time(booking.pickup_time)
+    if pickup_dt is None:
+        return None
+    if booking.rental_type == "daily":
+        return pickup_dt + timedelta(days=booking.rental_duration)
+    return pickup_dt + timedelta(hours=booking.rental_duration)
+
+
+def _is_overdue_never_picked_up(booking: Booking) -> bool:
+    """True only if the booking is still pre-pickup (locker never opened)
+    AND its return deadline has already passed. Unlike _is_cancellable,
+    this fails CLOSED (returns False) when the deadline can't be computed —
+    surrendering is a punitive, no-show-counting action, so an unparseable
+    date should never be treated as "definitely overdue".
+    """
+    if booking.status not in NEVER_PICKED_UP_STATUSES:
+        return False
+    deadline = _compute_return_deadline(booking)
+    if deadline is None:
+        return False
+    return datetime.now(timezone.utc) > deadline
+
+
+async def _free_drone_and_locker(booking: Booking, db: AsyncSession) -> None:
+    """Shared cleanup for the surrender / auto-expiry paths: release the
+    drone back to inventory.
+
+    BUG FIX (2026-09-08, same day this was introduced): this used to also
+    clear LockerUnit.current_drone_id/current_passcode whenever it pointed
+    at this drone. That's wrong here — a no-show by definition means the
+    drone was NEVER removed from the locker, so it is still genuinely,
+    physically sitting there. drone_service.list_drones()'s `status=available`
+    filter requires BOTH Drone.status == "available" AND a live
+    LockerUnit.current_drone_id match (see that function's comment) — clearing
+    the FK made the drone permanently invisible to the consumer browse
+    endpoint even after status flipped back to "available", since nothing
+    (no future PackageDeposited webhook) would ever reset the pointer. Only
+    the real "drone physically left the locker" event (the PackagePickedUp
+    webhook) should ever clear that FK. This now matches cancel_booking(),
+    which has always correctly left the locker alone and only frees the
+    drone's status.
+    """
+    drone_result = await db.execute(select(Drone).where(Drone.id == booking.drone_id))
+    drone = drone_result.scalar_one_or_none()
+    if drone:
+        drone.status = "available"
+        db.add(drone)
+
+
+async def _auto_expire_if_overdue(booking: Booking, db: AsyncSession) -> Booking:
+    """Lazy server-side enforcement of the return deadline for a booking
+    that was never picked up. There is no background job / cron
+    infrastructure in this backend (confirmed: no Render cron service
+    exists), so this can't fire the instant a deadline passes — instead it
+    runs opportunistically on every read of a booking (get/list/detail/
+    active), catching it up the next time anyone (the owning user, or an
+    admin listing) looks at it. Safe to call unconditionally; no-ops unless
+    _is_overdue_never_picked_up() is true.
+    """
+    if not _is_overdue_never_picked_up(booking):
+        return booking
+    booking.status = "no_show"
+    _stamp_status_timestamp(booking, "no_show")
+    db.add(booking)
+    await _free_drone_and_locker(booking, db)
+    await db.flush()
+    logger.info("Booking %s auto-expired to no_show (deadline passed, never picked up)", booking.id)
+    return booking
 
 
 def _stamp_status_timestamp(booking: Booking, new_status: str) -> None:
@@ -278,6 +370,33 @@ async def create_booking(
             detail="You already have an active reservation. Return or cancel it before booking another drone.",
         )
 
+    # 0b. Repeat no-show policy: block new bookings once a user has racked up
+    #     NO_SHOW_REPEAT_THRESHOLD `no_show` bookings within the trailing
+    #     NO_SHOW_REPEAT_WINDOW_DAYS. This is the first automated enforcement
+    #     of any kind in this backend (no penalties exist for late returns
+    #     either) — deliberately scoped narrow to the no-show case per
+    #     product direction, not a general strikes system.
+    no_show_window_start = datetime.now(timezone.utc) - timedelta(days=NO_SHOW_REPEAT_WINDOW_DAYS)
+    no_show_count_result = await db.execute(
+        select(func.count())
+        .select_from(Booking)
+        .where(
+            Booking.user_id == current_user.id,
+            Booking.status == "no_show",
+            Booking.no_show_at.isnot(None),
+            Booking.no_show_at >= no_show_window_start,
+        )
+    )
+    if no_show_count_result.scalar_one() >= NO_SHOW_REPEAT_THRESHOLD:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                f"You've missed pickup on {NO_SHOW_REPEAT_THRESHOLD} or more reservations in the "
+                f"last {NO_SHOW_REPEAT_WINDOW_DAYS} days. New bookings are temporarily blocked — "
+                "contact support if you think this is a mistake."
+            ),
+        )
+
     # 1. Validate drone
     drone_result = await db.execute(select(Drone).where(Drone.id == body.drone_id))
     drone = drone_result.scalar_one_or_none()
@@ -376,6 +495,7 @@ async def list_bookings(
     bookings = (
         await db.execute(query.order_by(Booking.created_at.desc()).offset(skip).limit(limit))
     ).scalars().all()
+    bookings = [await _auto_expire_if_overdue(b, db) for b in bookings]
 
     # Bug fix (2026-09-01): this previously called BookingResponse.model_validate(b)
     # directly on the ORM object, which raises a Pydantic ValidationError (-> 500)
@@ -428,6 +548,8 @@ async def get_active_booking(current_user: User, db: AsyncSession) -> BookingRes
         .limit(1)
     )
     booking = result.scalar_one_or_none()
+    if booking:
+        booking = await _auto_expire_if_overdue(booking, db)
     return booking_response(booking) if booking else None
 
 
@@ -540,6 +662,64 @@ async def cancel_booking(
 
     await db.flush()
     logger.info("Booking cancelled: %s", booking.id)
+    return booking
+
+
+# --------------------------------------------------------------------------- #
+# Surrender booking (no-show — never picked up, deadline passed)
+# --------------------------------------------------------------------------- #
+
+async def surrender_booking(
+    booking_id: str, current_user: User, db: AsyncSession
+) -> Booking:
+    """User-triggered counterpart to _auto_expire_if_overdue(): lets someone
+    who reserved a drone but never opened the locker release it immediately
+    once they're overdue, instead of it sitting locked until the next
+    incidental read auto-expires it. Deliberately separate from
+    cancel_booking() — that path is for voluntary, in-window cancellation and
+    is intentionally time-gated to stop last-minute cancels; this path only
+    opens up once you're *already* past the deadline and never checked out,
+    which cancel_booking would otherwise permanently block (see
+    CANCELLATION_FREE_WINDOW_HOURS/_is_cancellable).
+    """
+    booking = await _get_booking_or_404(booking_id, db)
+    _assert_current_user_booking(booking, current_user)
+
+    # _get_booking_or_404 already runs the same overdue check on every fetch
+    # (see _auto_expire_if_overdue) — if it already flipped this booking to
+    # no_show as part of *this same call*, treat that as success rather than
+    # a conflict: the user got what they asked for.
+    if booking.status == "no_show":
+        return booking
+
+    if booking.status in TERMINAL_BOOKING_STATUSES:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Cannot surrender a booking with status '{booking.status}'.",
+        )
+
+    if booking.status not in NEVER_PICKED_UP_STATUSES:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "The locker has already been opened for this booking — use the return flow "
+                "(photos + video) instead of surrendering it."
+            ),
+        )
+
+    deadline = _compute_return_deadline(booking)
+    if deadline is None or datetime.now(timezone.utc) <= deadline:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This booking isn't overdue yet — surrender is only available once the return deadline has passed.",
+        )
+
+    booking.status = "no_show"
+    _stamp_status_timestamp(booking, "no_show")
+    db.add(booking)
+    await _free_drone_and_locker(booking, db)
+    await db.flush()
+    logger.info("Booking surrendered as no-show: %s", booking.id)
     return booking
 
 

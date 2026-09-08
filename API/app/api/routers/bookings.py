@@ -7,6 +7,7 @@ Booking lifecycle endpoints:
   GET   /api/bookings/{id}
   GET   /api/bookings/{id}/passcode
   PATCH /api/bookings/{id}/cancel
+  POST  /api/bookings/{id}/surrender
 
 Damage / return endpoints:
   POST  /api/bookings/{id}/images/pre-rental
@@ -150,6 +151,20 @@ async def cancel_booking(
     current_user: User = Depends(get_current_user),
 ):
     booking = await booking_service.cancel_booking(booking_id, current_user, db)
+    return await booking_service.get_booking_detail(booking.id, current_user, db)
+
+
+@router.post(
+    "/{booking_id}/surrender",
+    response_model=BookingResponse,
+    summary="Surrender a booking that was never picked up before its deadline passed",
+)
+async def surrender_booking(
+    booking_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    booking = await booking_service.surrender_booking(booking_id, current_user, db)
     return await booking_service.get_booking_detail(booking.id, current_user, db)
 
 

@@ -15,11 +15,12 @@ BOOKING_STATUSES = (
     "return_video_complete",
     "returned",
     "cancelled",
+    "no_show",
 )
 
 BOOKING_STATUS_PATTERN = "^(" + "|".join(BOOKING_STATUSES) + ")$"
 
-TERMINAL_BOOKING_STATUSES = {"returned", "cancelled"}
+TERMINAL_BOOKING_STATUSES = {"returned", "cancelled", "no_show"}
 
 BOOKING_TRANSITIONS = {
     "ready_for_pickup": "reserved",
@@ -54,4 +55,16 @@ BOOKING_STATUS_TIMESTAMP_FIELDS = {
     "return_video_complete": "return_video_completed_at",
     "returned": "returned_at",
     "cancelled": "cancelled_at",
+    "no_show": "no_show_at",
 }
+
+# Surrender / no-show policy (added 2026-09-08 for the "never picked up,
+# deadline passed" gap — see booking_service.surrender_booking() /
+# _auto_expire_if_overdue()). A booking that is still `reserved` or
+# `ready_for_pickup` (locker never opened) once its return deadline has
+# passed can be surrendered by the user, or auto-expired server-side on
+# next read, transitioning it to the terminal `no_show` status and
+# freeing the drone.
+NO_SHOW_REPEAT_THRESHOLD = 3
+NO_SHOW_REPEAT_WINDOW_DAYS = 30
+

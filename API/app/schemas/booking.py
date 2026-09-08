@@ -72,12 +72,18 @@ class BookingResponse(BaseModel):
     return_video_completed_at: Optional[datetime]
     returned_at: Optional[datetime]
     cancelled_at: Optional[datetime]
+    no_show_at: Optional[datetime]
     # Computed at response-build time (not a stored column) — see
     # booking_service._is_cancellable(). True unless pickup is within the
     # 24h free-cancellation window AND the post-booking 2h grace period has
     # already passed. Defaults True here only so BookingResponse.model_validate()
     # can construct from raw table columns before booking_response() overwrites it.
     is_cancellable: bool = True
+    # Computed at response-build time, mirroring is_cancellable above — see
+    # booking_service._is_overdue_never_picked_up(). True only while the
+    # booking is still `reserved`/`ready_for_pickup` (locker never opened)
+    # AND the return deadline has already passed.
+    is_surrenderable: bool = False
     drone: Optional[dict[str, Any]] = None
     location: Optional[dict[str, Any]] = None
     pre_rental_images: list[str] = []
