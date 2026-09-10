@@ -262,7 +262,6 @@ class DronePhotoUploadResponse(BaseModel):
     image_urls: list[str]
     uploaded_count: int
     failed_count: int
-    errors: list[str] = []  # TEMPORARY diagnostic field — remove once upload issue is confirmed fixed.
 
 
 class AdminDroneSearchResponse(BaseModel):
