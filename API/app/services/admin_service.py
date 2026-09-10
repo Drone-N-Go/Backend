@@ -1269,9 +1269,12 @@ async def upload_drone_photos(
                 prefix=f"drone-photos/{drone.id}",
             )
             new_urls.append(url)
-        except Exception:
+        except Exception as exc:
             failed_count += 1
-            _admin_debug("drone_photo_upload_failed", drone_id=drone.id, index=i)
+            logger.error(
+                "drone_photo_upload_failed drone_id=%s index=%s error=%s",
+                drone.id, i, exc, exc_info=True,
+            )
 
     if new_urls:
         existing = list(drone.image_urls or [])
