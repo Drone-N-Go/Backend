@@ -1260,6 +1260,7 @@ async def upload_drone_photos(
 
     new_urls: list[str] = []
     failed_count = 0
+    errors: list[str] = []  # TEMPORARY diagnostic — remove alongside the schema field above.
     for i, b64 in enumerate(body.photo_data):
         try:
             image_bytes = base64.b64decode(b64)
@@ -1271,9 +1272,11 @@ async def upload_drone_photos(
             new_urls.append(url)
         except Exception as exc:
             failed_count += 1
+            error_text = f"{type(exc).__name__}: {exc}"
+            errors.append(error_text)
             logger.error(
                 "drone_photo_upload_failed drone_id=%s index=%s error=%s",
-                drone.id, i, exc, exc_info=True,
+                drone.id, i, error_text, exc_info=True,
             )
 
     if new_urls:
@@ -1296,6 +1299,7 @@ async def upload_drone_photos(
         image_urls=drone.image_urls or [],
         uploaded_count=len(new_urls),
         failed_count=failed_count,
+        errors=errors,
     )
 
 
