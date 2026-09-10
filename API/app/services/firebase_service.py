@@ -93,9 +93,13 @@ def _get_bucket():
 
 
 def _upload_and_publish(bucket, key: str, data: bytes, content_type: str) -> str:
+    # NOTE: does not call blob.make_public() — that uses the legacy per-object ACL API,
+    # which is rejected with a 400 when the bucket has Uniform bucket-level access enabled
+    # (the default for new buckets). Public read access is instead granted once at the
+    # bucket level via IAM (allUsers -> Storage Object Viewer), so every object under this
+    # bucket is already publicly readable and blob.public_url just needs to be constructed.
     blob = bucket.blob(key)
     blob.upload_from_string(data, content_type=content_type)
-    blob.make_public()
     return blob.public_url
 
 
