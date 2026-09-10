@@ -82,18 +82,35 @@ async def upload_pre_rental_images(
 
     urls = await upload_images(files, folder=f"drone-images/pre-rental/{booking_id}")
 
-    report.pre_rental_images = list(report.pre_rental_images or []) + urls
-    db.add(report)
-    await db.flush()
+    # TEMPORARY diagnostic wrapper around everything after the actual Firebase
+    # upload succeeds — surfaces the real exception text through the response
+    # body's `detail` field (the app already displays whatever's there)
+    # instead of a generic 500, since uploads reaching this point were
+    # otherwise failing with no visible cause. Revert to the plain code below
+    # once the real bug is found and fixed:
+    #   report.pre_rental_images = list(report.pre_rental_images or []) + urls
+    #   db.add(report)
+    #   await db.flush()
+    #   return ImageUploadResponse(..., damage_report=DamageReportResponse.model_validate(report))
+    try:
+        report.pre_rental_images = list(report.pre_rental_images or []) + urls
+        db.add(report)
+        await db.flush()
 
-    logger.info("Uploaded %d pre-rental images for booking %s", len(urls), booking_id)
+        logger.info("Uploaded %d pre-rental images for booking %s", len(urls), booking_id)
 
-    return ImageUploadResponse(
-        booking_id=booking_id,
-        image_type="pre_rental",
-        uploaded_urls=urls,
-        damage_report=DamageReportResponse.model_validate(report),
-    )
+        return ImageUploadResponse(
+            booking_id=booking_id,
+            image_type="pre_rental",
+            uploaded_urls=urls,
+            damage_report=DamageReportResponse.model_validate(report),
+        )
+    except Exception as e:
+        logger.error("upload_pre_rental_images post-upload step failed for booking %s: %s", booking_id, e, exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"{type(e).__name__}: {e}",
+        )
 
 
 async def upload_post_rental_images(
