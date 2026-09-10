@@ -196,7 +196,8 @@ async def upload_image_bytes(image_bytes: bytes, content_type: str = "image/jpeg
         logger.error("Firebase upload_image_bytes failed for key %s: %s", object_key, str(e))
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Failed to upload image to storage.",
+            # TEMPORARY: real exception text included for diagnosis — revert to generic message once fixed.
+            detail=f"Failed to upload image to storage: {type(e).__name__}: {e}",
         )
 
 
