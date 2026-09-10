@@ -1176,7 +1176,7 @@ async def intake_drone(
     context: AdminContext, locker_unit_id: str, body: "DroneIntakeRequest", db: AsyncSession
 ) -> "DroneIntakeResponse":
     import base64
-    from app.services.s3_service import upload_image_bytes
+    from app.services.firebase_service import upload_image_bytes
     from app.schemas.admin import DroneIntakeResponse
 
     unit = await _get_unit_for_admin(context, locker_unit_id, db)
@@ -1241,6 +1241,58 @@ async def intake_drone(
         locker_unit_id=unit.id,
         photo_urls=photo_urls,
         message=f"{drone.model_name} successfully checked into locker {unit.unit_number}.",
+    )
+
+
+async def upload_drone_photos(
+    context: AdminContext, drone_id: str, body: "DronePhotoUploadRequest", db: AsyncSession
+) -> "DronePhotoUploadResponse":
+    """Add one or more condition photos to a drone that's already been intaked —
+    for touch-ups/updates after the initial intake flow, not a replacement for it."""
+    import base64
+    from app.services.firebase_service import upload_image_bytes
+    from app.schemas.admin import DronePhotoUploadResponse
+
+    result = await db.execute(select(Drone).where(Drone.id == drone_id))
+    drone = result.scalar_one_or_none()
+    if not drone:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Drone not found.")
+
+    new_urls: list[str] = []
+    failed_count = 0
+    for i, b64 in enumerate(body.photo_data):
+        try:
+            image_bytes = base64.b64decode(b64)
+            url = await upload_image_bytes(
+                image_bytes,
+                content_type="image/jpeg",
+                prefix=f"drone-photos/{drone.id}",
+            )
+            new_urls.append(url)
+        except Exception:
+            failed_count += 1
+            _admin_debug("drone_photo_upload_failed", drone_id=drone.id, index=i)
+
+    if new_urls:
+        existing = list(drone.image_urls or [])
+        drone.image_urls = existing + new_urls
+        db.add(drone)
+        await db.flush()
+
+        await _audit(
+            db,
+            context,
+            "admin.drone_photos_add",
+            "drone",
+            drone.id,
+            {"added_count": len(new_urls), "failed_count": failed_count},
+        )
+
+    return DronePhotoUploadResponse(
+        drone_id=drone.id,
+        image_urls=drone.image_urls or [],
+        uploaded_count=len(new_urls),
+        failed_count=failed_count,
     )
 
 

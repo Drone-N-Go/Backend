@@ -67,12 +67,20 @@ class Settings(BaseSettings):
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
 
     # ------------------------------------------------------------------ #
-    # AWS S3
+    # Firebase Storage
     # ------------------------------------------------------------------ #
-    aws_access_key_id: str | None = None
-    aws_secret_access_key: str | None = None
-    aws_region: str = "us-east-1"
-    aws_s3_bucket: str | None = None
+    firebase_storage_bucket: str | None = None
+    # Base64-encoded Firebase service account JSON (set as FIREBASE_CREDENTIALS_JSON).
+    firebase_credentials_json: str | None = None
+
+    # ------------------------------------------------------------------ #
+    # Resend (contact form email)
+    # ------------------------------------------------------------------ #
+    resend_api_key: str | None = None
+    # Verified-domain sender address for outbound Resend mail.
+    contact_from_email: str = "DroneAndGo Website <noreply@droneandgo.io>"
+    # Inbox that receives contact-form submissions.
+    contact_notify_email: str = "contact@droneandgo.io"
 
     # ------------------------------------------------------------------ #
     # Brute-force protection
@@ -96,9 +104,8 @@ class Settings(BaseSettings):
             "database_url": self.database_url,
             "secret_key": self.secret_key,
             "smiota_api_key": self.smiota_api_key,
-            "aws_access_key_id": self.aws_access_key_id,
-            "aws_secret_access_key": self.aws_secret_access_key,
-            "aws_s3_bucket": self.aws_s3_bucket,
+            "firebase_storage_bucket": self.firebase_storage_bucket,
+            "resend_api_key": self.resend_api_key,
         }
         for name, value in sensitive_values.items():
             if value and any(marker in value for marker in placeholders):
@@ -119,19 +126,24 @@ class Settings(BaseSettings):
             raise ValueError("SMIOTA_API_KEY is required for Smiota webhook requests.")
         return self.smiota_api_key
 
-    def require_s3_settings(self) -> tuple[str, str, str]:
+    def require_resend_api_key(self) -> str:
+        if not self.resend_api_key:
+            raise ValueError("RESEND_API_KEY is required to send contact form emails.")
+        return self.resend_api_key
+
+    def require_firebase_settings(self) -> tuple[str, str]:
+        """Return (credentials_json_b64, bucket_name), raising if either is missing."""
         missing = [
             name
             for name, value in {
-                "AWS_ACCESS_KEY_ID": self.aws_access_key_id,
-                "AWS_SECRET_ACCESS_KEY": self.aws_secret_access_key,
-                "AWS_S3_BUCKET": self.aws_s3_bucket,
+                "FIREBASE_CREDENTIALS_JSON": self.firebase_credentials_json,
+                "FIREBASE_STORAGE_BUCKET": self.firebase_storage_bucket,
             }.items()
             if not value
         ]
         if missing:
-            raise ValueError(f"{', '.join(missing)} required for S3 uploads.")
-        return self.aws_access_key_id, self.aws_secret_access_key, self.aws_s3_bucket
+            raise ValueError(f"{', '.join(missing)} required for Firebase Storage uploads.")
+        return self.firebase_credentials_json, self.firebase_storage_bucket
 
 
 @lru_cache()

@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.booking import Booking
 from app.models.support_report import SupportReport
 from app.models.user import User
-from app.services.s3_service import upload_images
+from app.services.firebase_service import upload_images
 
 logger = logging.getLogger(__name__)
 

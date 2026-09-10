@@ -21,7 +21,7 @@ from app.schemas.damage import (
     ImageUploadResponse,
     ReturnVideoUploadResponse,
 )
-from app.services.s3_service import upload_images, upload_video
+from app.services.firebase_service import upload_images, upload_video
 
 logger = logging.getLogger(__name__)
 

@@ -251,6 +251,19 @@ class AdminDroneLookupResponse(BaseModel):
     image_urls: list[str] = []
 
 
+class DronePhotoUploadRequest(BaseModel):
+    photo_data: list[str] = Field(..., min_length=1, description="Base64-encoded JPEG images to add to this drone.")
+
+
+class DronePhotoUploadResponse(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
+    drone_id: str
+    image_urls: list[str]
+    uploaded_count: int
+    failed_count: int
+
+
 class AdminDroneSearchResponse(BaseModel):
     items: list[AdminDroneLookupResponse]
     total: int

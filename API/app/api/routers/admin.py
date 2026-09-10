@@ -38,6 +38,8 @@ from app.schemas.admin import (
     CaseQRVoidAndRegenerateRequest,
     DroneIntakeRequest,
     DroneIntakeResponse,
+    DronePhotoUploadRequest,
+    DronePhotoUploadResponse,
     LockerCurrentStateListResponse,
     LockerCurrentStateResponse,
     LockerDroneAssignmentRequest,
@@ -486,6 +488,20 @@ async def intake_drone(
     context: AdminContext = Depends(require_capability(MANAGE_DRONES)),
 ):
     return await admin_service.intake_drone(context, locker_unit_id, body, db)
+
+
+@router.post(
+    "/drones/{drone_id}/photos",
+    response_model=DronePhotoUploadResponse,
+    summary="Add condition photos to a drone that's already been intaked",
+)
+async def upload_drone_photos(
+    drone_id: str,
+    body: DronePhotoUploadRequest,
+    db: AsyncSession = Depends(get_db),
+    context: AdminContext = Depends(require_capability(MANAGE_DRONES)),
+):
+    return await admin_service.upload_drone_photos(context, drone_id, body, db)
 
 
 @router.get(
