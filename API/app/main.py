@@ -11,7 +11,7 @@ from fastapi.exceptions import RequestValidationError, ResponseValidationError
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routers import admin, auth, bookings, drones, locations, support, users, webhooks
+from app.api.routers import admin, auth, bookings, contact, drones, locations, support, users, webhooks
 from app.core.config import get_settings
 from app.db.startup import ensure_database_ready
 
@@ -113,6 +113,7 @@ app.include_router(bookings.router,  prefix=API_PREFIX)
 app.include_router(webhooks.router,  prefix=API_PREFIX)
 app.include_router(admin.router,     prefix=API_PREFIX)
 app.include_router(support.router,   prefix=API_PREFIX)
+app.include_router(contact.router,   prefix=API_PREFIX)
 
 
 @app.on_event("startup")
