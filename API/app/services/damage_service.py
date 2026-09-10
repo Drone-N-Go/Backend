@@ -82,35 +82,24 @@ async def upload_pre_rental_images(
 
     urls = await upload_images(files, folder=f"drone-images/pre-rental/{booking_id}")
 
-    # TEMPORARY diagnostic wrapper around everything after the actual Firebase
-    # upload succeeds — surfaces the real exception text through the response
-    # body's `detail` field (the app already displays whatever's there)
-    # instead of a generic 500, since uploads reaching this point were
-    # otherwise failing with no visible cause. Revert to the plain code below
-    # once the real bug is found and fixed:
-    #   report.pre_rental_images = list(report.pre_rental_images or []) + urls
-    #   db.add(report)
-    #   await db.flush()
-    #   return ImageUploadResponse(..., damage_report=DamageReportResponse.model_validate(report))
-    try:
-        report.pre_rental_images = list(report.pre_rental_images or []) + urls
-        db.add(report)
-        await db.flush()
+    report.pre_rental_images = list(report.pre_rental_images or []) + urls
+    db.add(report)
+    await db.flush()
+    # `updated_at` has onupdate=func.now() (server-computed), so after flush()
+    # that column is expired and a synchronous Pydantic read of it below would
+    # try to lazily re-fetch it, which fails with MissingGreenlet in an async
+    # context. db.refresh() explicitly re-fetches the server-generated value
+    # the right way before model_validate() touches it.
+    await db.refresh(report)
 
-        logger.info("Uploaded %d pre-rental images for booking %s", len(urls), booking_id)
+    logger.info("Uploaded %d pre-rental images for booking %s", len(urls), booking_id)
 
-        return ImageUploadResponse(
-            booking_id=booking_id,
-            image_type="pre_rental",
-            uploaded_urls=urls,
-            damage_report=DamageReportResponse.model_validate(report),
-        )
-    except Exception as e:
-        logger.error("upload_pre_rental_images post-upload step failed for booking %s: %s", booking_id, e, exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"{type(e).__name__}: {e}",
-        )
+    return ImageUploadResponse(
+        booking_id=booking_id,
+        image_type="pre_rental",
+        uploaded_urls=urls,
+        damage_report=DamageReportResponse.model_validate(report),
+    )
 
 
 async def upload_post_rental_images(
@@ -128,6 +117,10 @@ async def upload_post_rental_images(
     report.post_rental_images = list(report.post_rental_images or []) + urls
     db.add(report)
     await db.flush()
+    # See the matching comment in upload_pre_rental_images: updated_at is
+    # server-computed (onupdate=func.now()), so it's expired after flush()
+    # and needs an explicit async refresh before model_validate() reads it.
+    await db.refresh(report)
 
     logger.info("Uploaded %d post-rental images for booking %s", len(urls), booking_id)
 
@@ -154,6 +147,10 @@ async def upload_return_video(
     report.return_video_uploaded_at = datetime.now(timezone.utc)
     db.add(report)
     await db.flush()
+    # See the matching comment in upload_pre_rental_images: updated_at is
+    # server-computed (onupdate=func.now()), so it's expired after flush()
+    # and needs an explicit async refresh before model_validate() reads it.
+    await db.refresh(report)
 
     logger.info("Uploaded return video for booking %s", booking_id)
 
