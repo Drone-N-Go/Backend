@@ -108,6 +108,23 @@ def booking_response(booking: Booking, favorite_ids: set[str] | None = None) -> 
     return response
 
 
+def _booking_response_safe(booking: Booking) -> BookingResponse:
+    # TEMPORARY diagnostic wrapper — surfaces the real exception text through
+    # the response body's `detail` field (the iOS app already displays
+    # whatever's there), so it's visible directly in the app without a curl
+    # round-trip or digging through Render logs. Revert every call site below
+    # back to calling booking_response(...) directly, and delete this
+    # function, once the real bug is found and fixed.
+    try:
+        return booking_response(booking)
+    except Exception as e:
+        logger.error("booking_response failed for booking %s: %s", booking.id, e, exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"{type(e).__name__}: {e}",
+        )
+
+
 def _assert_current_user_booking(booking: Booking, current_user: User) -> None:
     if booking.user_id != current_user.id:
         raise HTTPException(
@@ -505,7 +522,7 @@ async def list_bookings(
     # eager-loading above so drone/location/damage_report are actually populated
     # here instead of triggering an async lazy-load error.
     return BookingListResponse(
-        items=[booking_response(b) for b in bookings],
+        items=[_booking_response_safe(b) for b in bookings],
         total=total,
         skip=skip,
         limit=limit,
@@ -529,7 +546,7 @@ async def get_booking_detail(
 ) -> BookingResponse:
     booking = await _get_booking_detail_or_404(booking_id, db)
     _assert_current_user_booking(booking, current_user)
-    return booking_response(booking)
+    return _booking_response_safe(booking)
 
 
 async def get_active_booking(current_user: User, db: AsyncSession) -> BookingResponse | None:
@@ -550,21 +567,7 @@ async def get_active_booking(current_user: User, db: AsyncSession) -> BookingRes
     booking = result.scalar_one_or_none()
     if booking:
         booking = await _auto_expire_if_overdue(booking, db)
-    if not booking:
-        return None
-    try:
-        return booking_response(booking)
-    except Exception as e:
-        # TEMPORARY diagnostic — surfaces the real exception text through the
-        # response body (the iOS app already displays whatever's in `detail`),
-        # so it's visible without a curl round-trip or digging through Render
-        # logs. Revert to a plain re-raise (or let it propagate uncaught)
-        # once the real bug behind the "My Rental" 500 is found and fixed.
-        logger.error("get_active_booking failed for booking %s: %s", booking.id, e, exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"{type(e).__name__}: {e}",
-        )
+    return _booking_response_safe(booking) if booking else None
 
 
 async def list_booking_history(
@@ -600,7 +603,7 @@ async def list_booking_history(
     total = (await db.execute(count_query)).scalar_one()
     bookings = (await db.execute(query)).scalars().all()
     return BookingListResponse(
-        items=[booking_response(b) for b in bookings],
+        items=[_booking_response_safe(b) for b in bookings],
         total=total,
         skip=skip,
         limit=limit,
