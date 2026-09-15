@@ -21,6 +21,7 @@ from app.models import (  # noqa: F401
     admin_profile,
     booking,
     case_qr_token,
+    contact_submission,
     damage_report,
     drone,
     drone_favorite,

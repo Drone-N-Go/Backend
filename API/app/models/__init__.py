@@ -2,6 +2,7 @@ from app.models.admin_audit_event import AdminAuditEvent
 from app.models.admin_profile import AdminLocationAssignment, AdminProfile
 from app.models.booking import Booking
 from app.models.case_qr_token import CaseQRToken
+from app.models.contact_submission import ContactSubmission
 from app.models.damage_report import DamageReport
 from app.models.drone import Drone
 from app.models.drone_favorite import DroneFavorite
@@ -20,6 +21,7 @@ __all__ = [
     "AdminProfile",
     "Booking",
     "CaseQRToken",
+    "ContactSubmission",
     "DamageReport",
     "Drone",
     "DroneFavorite",
