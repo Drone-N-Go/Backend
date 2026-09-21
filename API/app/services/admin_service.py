@@ -929,6 +929,44 @@ async def create_admin_drone(
 ) -> AdminDroneLookupResponse:
     from app.services.drone_service import create_drone as _create_drone
 
+    # Upload any attached photos BEFORE creating the drone row. All-or-nothing:
+    # if any image fails, we raise immediately and never touch the DB, so there's
+    # no partially-created drone. Uploaded URLs from earlier images in this same
+    # failed attempt are orphaned in storage (not rolled back) but nothing is
+    # written to Postgres, which is the guarantee that matters here.
+    if body.photo_data:
+        import base64
+
+        from app.services.firebase_service import upload_image_bytes
+
+        uploaded_urls: list[str] = []
+        total = len(body.photo_data)
+        for index, b64 in enumerate(body.photo_data, start=1):
+            try:
+                image_bytes = base64.b64decode(b64)
+                url = await upload_image_bytes(
+                    image_bytes,
+                    content_type="image/jpeg",
+                    prefix=f"drone-photos/pending-{body.serial_number}",
+                )
+                uploaded_urls.append(url)
+            except HTTPException as exc:
+                raise HTTPException(
+                    status_code=exc.status_code,
+                    detail=f"Photo {index} of {total} failed to upload: {exc.detail}",
+                ) from exc
+            except Exception as exc:
+                logger.error(
+                    "drone_create_photo_upload_failed serial=%s index=%s error=%s",
+                    body.serial_number, index, exc, exc_info=True,
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail=f"Photo {index} of {total} failed to upload. No drone was created.",
+                ) from exc
+
+        body = body.model_copy(update={"image_urls": [*body.image_urls, *uploaded_urls]})
+
     drone = await _create_drone(body, db)
     await _audit(
         db,

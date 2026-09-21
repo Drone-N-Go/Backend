@@ -30,6 +30,10 @@ class DroneCreateRequest(BaseModel):
     rating: Decimal = Field(default=0, ge=0, le=5)
     review_count: int = Field(default=0, ge=0)
     image_urls: list[str] = []
+    # Base64-encoded JPEGs to upload and attach at creation time (admin-only flow).
+    # All-or-nothing: if any image fails to upload, the whole create request fails
+    # and no drone row is written. See admin_service.create_admin_drone().
+    photo_data: list[str] = []
     standout_features: list[str] = []
     included_items: list[str] = []
     rules: list[str] = []
