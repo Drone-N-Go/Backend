@@ -1356,6 +1356,12 @@ async def remove_drone_from_unit(
     db.add(drone)
 
     unit.current_drone_id = None
+    # Clear the already-loaded relationship too. Setting only the FK column
+    # leaves unit.current_drone pointing at the old Drone object in the
+    # session, so _locker_state() below would still report it as
+    # assigned_drone and the admin app would keep showing the drone.
+    # (assign_locker_drone does the same for the same reason.)
+    unit.current_drone = None
     unit.status = "available"
     db.add(unit)
     await db.flush()
