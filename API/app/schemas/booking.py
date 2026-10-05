@@ -84,6 +84,15 @@ class BookingResponse(BaseModel):
     # booking is still `reserved`/`ready_for_pickup` (locker never opened)
     # AND the return deadline has already passed.
     is_surrenderable: bool = False
+    # Stripe payment (2026-10-05). payment_status: unpaid | paid | refunded
+    # | canceled, or null for bookings made without payments.
+    payment_status: Optional[str] = None
+    amount_paid_cents: Optional[int] = None
+    stripe_fee_cents: Optional[int] = None
+    refunded_amount_cents: Optional[int] = None
+    paid_at: Optional[datetime] = None
+    # Only set while status == "pending_payment": when the drone hold lapses.
+    payment_expires_at: Optional[datetime] = None
     drone: Optional[dict[str, Any]] = None
     location: Optional[dict[str, Any]] = None
     pre_rental_images: list[str] = []

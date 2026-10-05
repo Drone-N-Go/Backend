@@ -8,6 +8,7 @@ load a gitignored .env file.
 
 from functools import lru_cache
 import os
+from decimal import Decimal
 from typing import List
 
 from pydantic import model_validator
@@ -44,6 +45,22 @@ class Settings(BaseSettings):
     # Smiota webhook
     # ------------------------------------------------------------------ #
     smiota_api_key: str | None = None
+
+    # ------------------------------------------------------------------ #
+    # Stripe payments (added 2026-10-05)
+    # ------------------------------------------------------------------ #
+    # PAYMENTS_ENABLED is the master switch. While it is false, bookings are
+    # created exactly as before (straight to `reserved`, nothing charged), so
+    # deploying this code changes nothing for the website or older app
+    # builds until it is deliberately turned on.
+    payments_enabled: bool = False
+    stripe_secret_key: str | None = None
+    stripe_publishable_key: str | None = None
+    stripe_webhook_secret: str | None = None
+    # Optional flat price per rental, in dollars (e.g. "1.00" while testing,
+    # "35.00" at launch). When unset, the price is the drone's hourly/daily
+    # rate x duration, as before.
+    rental_price_override: Decimal | None = None
 
     # ------------------------------------------------------------------ #
     # CORS
@@ -106,10 +123,16 @@ class Settings(BaseSettings):
             "smiota_api_key": self.smiota_api_key,
             "firebase_storage_bucket": self.firebase_storage_bucket,
             "resend_api_key": self.resend_api_key,
+            "stripe_secret_key": self.stripe_secret_key,
+            "stripe_publishable_key": self.stripe_publishable_key,
+            "stripe_webhook_secret": self.stripe_webhook_secret,
         }
         for name, value in sensitive_values.items():
             if value and any(marker in value for marker in placeholders):
                 raise ValueError(f"{name} still contains a placeholder value.")
+
+        if self.rental_price_override is not None and self.rental_price_override <= 0:
+            raise ValueError("RENTAL_PRICE_OVERRIDE must be greater than zero when set.")
 
         if len(self.secret_key) < 32:
             raise ValueError("SECRET_KEY must be at least 32 characters.")
@@ -125,6 +148,11 @@ class Settings(BaseSettings):
         if not self.smiota_api_key:
             raise ValueError("SMIOTA_API_KEY is required for Smiota webhook requests.")
         return self.smiota_api_key
+
+    def require_stripe_secret_key(self) -> str:
+        if not self.stripe_secret_key:
+            raise ValueError("STRIPE_SECRET_KEY is required for payments.")
+        return self.stripe_secret_key
 
     def require_resend_api_key(self) -> str:
         if not self.resend_api_key:

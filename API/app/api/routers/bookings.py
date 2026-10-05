@@ -9,6 +9,10 @@ Booking lifecycle endpoints:
   PATCH /api/bookings/{id}/cancel
   POST  /api/bookings/{id}/surrender
 
+Payment endpoints (Stripe, 2026-10-05):
+  POST  /api/bookings/{id}/payment-intent
+  POST  /api/bookings/{id}/payment/confirm
+
 Damage / return endpoints:
   POST  /api/bookings/{id}/images/pre-rental
   POST  /api/bookings/{id}/images/post-rental
@@ -45,7 +49,8 @@ from app.schemas.booking import (
 )
 from app.core.booking_lifecycle import BOOKING_STATUS_PATTERN
 from app.schemas.damage import BookingImagesResponse, ImageUploadResponse, ReturnVideoUploadResponse
-from app.services import booking_service, damage_service
+from app.schemas.payment import PaymentIntentResponse
+from app.services import booking_service, damage_service, payment_service
 
 router = APIRouter(prefix="/bookings", tags=["Bookings"])
 
@@ -165,6 +170,37 @@ async def surrender_booking(
     current_user: User = Depends(get_current_user),
 ):
     booking = await booking_service.surrender_booking(booking_id, current_user, db)
+    return await booking_service.get_booking_detail(booking.id, current_user, db)
+
+
+# --------------------------------------------------------------------------- #
+# Payment (Stripe)
+# --------------------------------------------------------------------------- #
+
+@router.post(
+    "/{booking_id}/payment-intent",
+    response_model=PaymentIntentResponse,
+    summary="Start (or resume) Stripe checkout for an unpaid booking",
+)
+async def create_payment_intent(
+    booking_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await payment_service.start_checkout(booking_id, current_user, db)
+
+
+@router.post(
+    "/{booking_id}/payment/confirm",
+    response_model=BookingResponse,
+    summary="Ask the server to verify payment with Stripe and activate the booking",
+)
+async def confirm_payment(
+    booking_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    booking = await payment_service.confirm_payment(booking_id, current_user, db)
     return await booking_service.get_booking_detail(booking.id, current_user, db)
 
 

@@ -3,6 +3,11 @@ Shared booking lifecycle constants.
 """
 
 BOOKING_STATUSES = (
+    # Booking created but not yet paid for. Only used when PAYMENTS_ENABLED
+    # is on: the drone is held while the renter completes Stripe checkout,
+    # and the booking only becomes `reserved` (or `ready_for_pickup`) once
+    # Stripe confirms the payment server-side. See payment_service.
+    "pending_payment",
     "reserved",
     "ready_for_pickup",
     "locker_opened",
@@ -68,3 +73,9 @@ BOOKING_STATUS_TIMESTAMP_FIELDS = {
 NO_SHOW_REPEAT_THRESHOLD = 3
 NO_SHOW_REPEAT_WINDOW_DAYS = 30
 
+
+# Stripe checkout hold (added 2026-10-05). A `pending_payment` booking holds
+# its drone for this long while the renter completes payment. After that it
+# is cancelled (and its PaymentIntent cancelled) the next time anyone reads
+# it, or immediately when that renter starts another checkout.
+PENDING_PAYMENT_TTL_MINUTES = 15

@@ -53,6 +53,19 @@ class Booking(Base):
     smiota_locker_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     smiota_courier_code: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
+    # Stripe payment (added 2026-10-05). All nullable: bookings made before
+    # payments existed, or while PAYMENTS_ENABLED is off, have no payment.
+    # payment_status: unpaid | paid | refunded | canceled
+    payment_status: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    stripe_payment_intent_id: Mapped[str | None] = mapped_column(
+        String(255), nullable=True, unique=True, index=True
+    )
+    amount_paid_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    stripe_fee_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    refunded_amount_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    stripe_refund_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
     ready_for_pickup_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     locker_opened_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     case_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

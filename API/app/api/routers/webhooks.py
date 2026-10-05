@@ -1,8 +1,9 @@
 """
 app/api/routers/webhooks.py
 ----------------------------
-Smiota webhook endpoint:
+Webhook endpoints:
   POST /api/webhooks/smiota
+  POST /api/webhooks/stripe
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -10,7 +11,9 @@ from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
+from app.schemas.payment import StripeWebhookResponse
 from app.schemas.webhook import SmiotaWebhookRequest, SmiotaWebhookResponse
+from app.services.payment_service import handle_stripe_webhook
 from app.services.webhook_service import (
     process_smiota_webhook,
     record_smiota_webhook_failure,
@@ -73,3 +76,20 @@ async def smiota_webhook(
         )
 
     return await process_smiota_webhook(body, db)
+
+
+@router.post(
+    "/stripe",
+    response_model=StripeWebhookResponse,
+    summary="Receive Stripe payment events",
+    description=(
+        "Called by Stripe. Authenticated by the Stripe-Signature header, verified "
+        "against STRIPE_WEBHOOK_SECRET over the raw request body."
+    ),
+)
+async def stripe_webhook(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    payload = await request.body()
+    return await handle_stripe_webhook(payload, request.headers.get("stripe-signature"), db)

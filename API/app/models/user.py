@@ -26,6 +26,10 @@ class User(Base):
     last_name: Mapped[str] = mapped_column(String(100), nullable=False)
     address: Mapped[str | None] = mapped_column(Text, nullable=True)
     school: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Stripe Customer for this user (added 2026-10-05). Created on first
+    # checkout; the card or Apple Pay used is saved to it so later damage or
+    # late-return fees can be charged.
+    stripe_customer_id: Mapped[str | None] = mapped_column(String(255), nullable=True, unique=True)
     role: Mapped[str] = mapped_column(
         String(20),
         nullable=False,

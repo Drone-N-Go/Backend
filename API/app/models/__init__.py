@@ -13,6 +13,7 @@ from app.models.login_attempt import LoginAttempt
 from app.models.maintenance_task import MaintenanceTask
 from app.models.refresh_token import RefreshToken
 from app.models.smiota_event import SmiotaEvent
+from app.models.stripe_event import StripeEvent
 from app.models.user import User
 
 __all__ = [
@@ -32,5 +33,6 @@ __all__ = [
     "MaintenanceTask",
     "RefreshToken",
     "SmiotaEvent",
+    "StripeEvent",
     "User",
 ]

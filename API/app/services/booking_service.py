@@ -35,6 +35,8 @@ from app.schemas.booking import (
     BookingResponse,
     PasscodeResponse,
 )
+from app.core.config import get_settings
+from app.services import payment_service
 from app.services.case_qr_service import assert_active_case_qr_matches_booking
 from app.services.drone_service import _drone_response
 
@@ -105,6 +107,9 @@ def booking_response(booking: Booking, favorite_ids: set[str] | None = None) -> 
         booking.status not in TERMINAL_BOOKING_STATUSES and _is_cancellable(booking)
     )
     response.is_surrenderable = _is_overdue_never_picked_up(booking)
+    if booking.status == "pending_payment":
+        response.is_cancellable = True
+        response.payment_expires_at = payment_service.pending_payment_expires_at(booking)
     return response
 
 
@@ -134,6 +139,11 @@ def _assert_current_user_booking(booking: Booking, current_user: User) -> None:
 
 
 def _calculate_cost(drone: Drone, rental_type: str, duration: int) -> Decimal:
+    # RENTAL_PRICE_OVERRIDE (Render env var) sets one flat price per rental,
+    # e.g. 1.00 while testing payments. Unset = the drone's own rates.
+    override = get_settings().rental_price_override
+    if override is not None:
+        return Decimal(str(override))
     if rental_type == "hourly":
         return Decimal(str(drone.hourly_rate)) * duration
     return Decimal(str(drone.daily_rate)) * duration
@@ -271,7 +281,11 @@ async def _auto_expire_if_overdue(booking: Booking, db: AsyncSession) -> Booking
     active), catching it up the next time anyone (the owning user, or an
     admin listing) looks at it. Safe to call unconditionally; no-ops unless
     _is_overdue_never_picked_up() is true.
+
+    Also expires an abandoned Stripe checkout (`pending_payment` past its
+    hold window) the same lazy way — see payment_service.expire_if_stale.
     """
+    booking = await payment_service.expire_if_stale(booking, db)
     if not _is_overdue_never_picked_up(booking):
         return booking
     booking.status = "no_show"
@@ -372,6 +386,19 @@ async def _advance_and_flush(
 async def create_booking(
     body: BookingCreateRequest, current_user: User, db: AsyncSession
 ) -> Booking:
+    # 0a. A renter who starts a new checkout abandons any earlier unpaid one
+    #     (e.g. they backed out of the payment sheet). If Stripe says that
+    #     earlier one was actually paid, it becomes their active booking and
+    #     the check below stops the new one.
+    pending_result = await db.execute(
+        select(Booking).where(
+            Booking.user_id == current_user.id,
+            Booking.status == "pending_payment",
+        )
+    )
+    for pending in pending_result.scalars().all():
+        await payment_service.abandon_pending_checkout(pending, db)
+
     # 0. Enforce one active (non-terminal) reservation per user. Matches
     #    the client-side rule the consumer apps already assume; enforced
     #    here so it can't be bypassed by calling the API directly.
@@ -419,6 +446,17 @@ async def create_booking(
     drone = drone_result.scalar_one_or_none()
     if not drone:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Drone not found.")
+    if drone.status == "rented":
+        # The drone may only be held by someone else's abandoned checkout;
+        # expire that hold if it has lapsed (this frees the drone).
+        holder_result = await db.execute(
+            select(Booking).where(
+                Booking.drone_id == drone.id,
+                Booking.status == "pending_payment",
+            )
+        )
+        for holder in holder_result.scalars().all():
+            await payment_service.expire_if_stale(holder, db)
     if drone.status != "available":
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -446,7 +484,11 @@ async def create_booking(
     )
     locker_unit = locker_unit_result.scalar_one_or_none()
 
-    # 5. Create booking
+    # 5. Create booking. With payments on, it starts as `pending_payment` and
+    #    only becomes `reserved` once Stripe confirms payment
+    #    (payment_service.activate_paid_booking, which also does the
+    #    locker-passcode shortcut below at that point instead).
+    payments_on = payment_service.payments_enabled()
     booking = Booking(
         user_id=current_user.id,
         drone_id=body.drone_id,
@@ -455,10 +497,11 @@ async def create_booking(
         rental_duration=body.rental_duration,
         rental_type=body.rental_type,
         total_cost=total_cost,
-        status="reserved",
+        status="pending_payment" if payments_on else "reserved",
+        payment_status="unpaid" if payments_on else None,
     )
 
-    if locker_unit and locker_unit.current_passcode:
+    if not payments_on and locker_unit and locker_unit.current_passcode:
         metadata = locker_unit.smiota_metadata or {}
         booking.smiota_passcode = locker_unit.current_passcode
         booking.smiota_locker_name = locker_unit.smiota_locker_name
@@ -555,6 +598,8 @@ async def get_active_booking(current_user: User, db: AsyncSession) -> BookingRes
         .where(
             Booking.user_id == current_user.id,
             Booking.status.notin_(TERMINAL_BOOKING_STATUSES),
+            # An unpaid checkout isn't a rental yet.
+            Booking.status != "pending_payment",
         )
         .options(
             selectinload(Booking.drone).selectinload(Drone.assigned_location),
@@ -656,6 +701,20 @@ async def cancel_booking(
             detail=f"Cannot cancel a booking with status '{booking.status}'.",
         )
 
+    if booking.status == "pending_payment":
+        # Nothing charged yet: drop the checkout and release the drone. If
+        # Stripe reports it was actually paid, abandon_pending_checkout
+        # activates it instead and we fall through to the normal paid
+        # cancellation (window check + refund) below.
+        booking = await payment_service.abandon_pending_checkout(booking, db)
+        if booking.status == "cancelled":
+            return booking
+        if booking.status == "pending_payment":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Your payment is still processing. Try cancelling again in a minute.",
+            )
+
     if not _is_cancellable(booking):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -665,6 +724,10 @@ async def cancel_booking(
                 f"{CANCELLATION_GRACE_PERIOD_HOURS}-hour cancellation grace period has passed."
             ),
         )
+
+    # Refund first (amount paid minus Stripe's fee). If Stripe fails, this
+    # raises and the booking stays as it was, so the renter can retry.
+    await payment_service.refund_for_cancellation(booking, db)
 
     booking.status = "cancelled"
     _stamp_status_timestamp(booking, "cancelled")
