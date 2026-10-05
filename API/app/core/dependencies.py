@@ -97,10 +97,15 @@ async def get_optional_user(
     return await _resolve_user_from_token(token, db)
 
 
-async def require_admin_profile(
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-) -> AdminContext:
+# Exact `detail` string returned (403) when an admin still has to replace a
+# temporary password. Clients (Admin iOS, Web) match on this exact string to
+# switch to their forced change-password view, so do not reword it without
+# updating them too. Kept as a plain string (not a dict) because both clients
+# decode `detail` as a string.
+PASSWORD_CHANGE_REQUIRED_DETAIL = "Password change required."
+
+
+async def _load_admin_context(current_user: User, db: AsyncSession) -> AdminContext:
     result = await db.execute(
         select(AdminProfile)
         .where(AdminProfile.user_id == current_user.id, AdminProfile.status == "active")
@@ -118,6 +123,37 @@ async def require_admin_profile(
         capabilities=capabilities_for_role(profile.role),
         assigned_location_ids={assignment.location_id for assignment in profile.location_assignments},
     )
+
+
+def enforce_password_changed(profile: AdminProfile) -> None:
+    """Server-side gate: an admin with a temporary password may not use admin
+    features until they change it via POST /api/users/me/change-password
+    (which clears the flag). Enforced here so every client — iOS, Web,
+    Android, or a raw HTTP call — is held to it, not just the UI."""
+    if profile.must_change_password:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=PASSWORD_CHANGE_REQUIRED_DETAIL,
+        )
+
+
+async def require_admin_profile_allow_pending_password(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> AdminContext:
+    """Admin profile WITHOUT the forced-password-change gate. Use ONLY for
+    GET /api/admin/me, which clients need in order to learn that a change
+    is required in the first place."""
+    return await _load_admin_context(current_user, db)
+
+
+async def require_admin_profile(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> AdminContext:
+    context = await _load_admin_context(current_user, db)
+    enforce_password_changed(context.profile)
+    return context
 
 
 def require_capability(capability: str):

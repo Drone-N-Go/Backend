@@ -19,7 +19,12 @@ from app.core.admin_permissions import (
     REVEAL_LOCKER_PASSCODE,
     VIEW_LOCKER_STATE,
 )
-from app.core.dependencies import AdminContext, require_admin_profile, require_capability
+from app.core.dependencies import (
+    AdminContext,
+    require_admin_profile,
+    require_admin_profile_allow_pending_password,
+    require_capability,
+)
 from app.db.session import get_db
 from app.schemas.admin import (
     AdminDroneLookupResponse,
@@ -93,7 +98,7 @@ async def setup_owner(
     response_model=AdminMeResponse,
     summary="Get the current admin profile and capabilities",
 )
-async def me(context: AdminContext = Depends(require_admin_profile)):
+async def me(context: AdminContext = Depends(require_admin_profile_allow_pending_password)):
     profile = await admin_service.get_me(context)
     return AdminMeResponse(profile=profile)
 
