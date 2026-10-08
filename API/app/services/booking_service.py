@@ -20,6 +20,7 @@ from app.models.drone import Drone
 from app.models.locker_location import LockerLocation
 from app.models.locker_unit import LockerUnit
 from app.models.user import User
+from app.core import pricing
 from app.core.booking_lifecycle import (
     BOOKING_STATUS_TIMESTAMP_FIELDS,
     BOOKING_TRANSITIONS,
@@ -140,13 +141,12 @@ def _assert_current_user_booking(booking: Booking, current_user: User) -> None:
 
 def _calculate_cost(drone: Drone, rental_type: str, duration: int) -> Decimal:
     # RENTAL_PRICE_OVERRIDE (Render env var) sets one flat price per rental,
-    # e.g. 1.00 while testing payments. Unset = the drone's own rates.
+    # e.g. 1.00 while testing payments. Unset = standard pricing for every
+    # drone: $35/day, hourly = $35 / 24 (see app/core/pricing.py).
     override = get_settings().rental_price_override
     if override is not None:
         return Decimal(str(override))
-    if rental_type == "hourly":
-        return Decimal(str(drone.hourly_rate)) * duration
-    return Decimal(str(drone.daily_rate)) * duration
+    return pricing.rental_cost(rental_type, duration)
 
 
 def _parse_pickup_time(pickup_time: str) -> datetime | None:

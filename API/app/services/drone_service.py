@@ -9,6 +9,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core import pricing
 from app.models.drone import Drone
 from app.models.drone_favorite import DroneFavorite
 from app.models.locker_unit import LockerUnit
@@ -45,8 +46,10 @@ def _drone_response(drone: Drone, favorite_ids: set[str] | None = None) -> Drone
         serial_number=drone.serial_number,
         status=drone.status,
         assigned_locker_location_id=drone.assigned_locker_location_id,
-        hourly_rate=drone.hourly_rate,
-        daily_rate=drone.daily_rate,
+        # Standard pricing for every drone ($35/day, hourly = $35/24) —
+        # the per-drone rate columns are no longer used. See app/core/pricing.py.
+        hourly_rate=pricing.HOURLY_RATE_DISPLAY,
+        daily_rate=pricing.DAILY_RATE,
         rating=drone.rating,
         review_count=drone.review_count,
         image_urls=list(drone.image_urls or []),
