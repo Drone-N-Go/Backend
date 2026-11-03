@@ -11,6 +11,7 @@ from fastapi import HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.booking_lifecycle import TERMINAL_BOOKING_STATUSES
 from app.core.config import get_settings
 from app.db.session import AsyncSessionLocal
 from app.models.booking import Booking
@@ -75,59 +76,177 @@ def verify_smiota_auth(request: Request) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# Restock handling (PackageDeposited with no pre-existing booking)
+# Resolving which cabinet and which booking an event belongs to
 # --------------------------------------------------------------------------- #
+#
+# Smiota's `objectId` is whatever label the depositor typed (in practice the
+# drone's model name, e.g. "Mavic Pro"), so it is NOT unique: every rental of
+# a drone, and every drone of the same model, can carry the same one. Matching
+# events to bookings by objectId alone used to raise MultipleResultsFound (a
+# 500) once a drone had been rented twice, or attach an event to an old,
+# finished booking. (Fixed 2026-11-02.)
+#
+# Events are now resolved in this order:
+#   1. The cabinet, by `lockerName` (LockerUnit.smiota_locker_name).
+#   2. The booking, as the ACTIVE booking for the drone linked to that cabinet.
+#   3. Only when the cabinet can't be resolved (no or unknown lockerName):
+#      the ACTIVE booking carrying this objectId, and only if exactly one does.
+# Finished bookings (returned / cancelled / no_show) are never matched, so a
+# stale objectId left on them is harmless.
 
-async def _handle_restock_deposit(
-    body: SmiotaWebhookRequest, event: SmiotaEvent, db: AsyncSession
-) -> SmiotaWebhookResponse:
-    """
-    A PackageDeposited event that doesn't match any existing booking means a
-    drone is being stocked into a locker ahead of any reservation. Resolve
-    the LockerUnit by lockerName, mark its assigned drone available, and hold
-    the passcode + Smiota object/courier ids on the LockerUnit so
-    create_booking() can attach them to whichever booking claims this drone.
-    """
+# Bookings that are not rentals yet or anymore. pending_payment is an unpaid
+# checkout hold: it must not receive a passcode until Stripe confirms payment
+# (payment_service.activate_paid_booking reads it off the cabinet then).
+_NOT_ACTIVE_STATUSES = set(TERMINAL_BOOKING_STATUSES) | {"pending_payment"}
+
+# A deposit only fulfils a booking that is still waiting for its drone.
+_AWAITING_PICKUP_STATUSES = ("reserved", "ready_for_pickup")
+
+
+async def _resolve_unit(body: SmiotaWebhookRequest, db: AsyncSession) -> LockerUnit | None:
     if not body.lockerName:
-        logger.warning(
-            "PackageDeposited with no matching booking and no lockerName; cannot resolve locker. object_id=%s",
-            body.objectId,
-        )
-        event.processing_status = "unmatched"
-        event.error_message = "No matching booking and no lockerName to resolve a restock target."
-        db.add(event)
-        await db.flush()
-        return SmiotaWebhookResponse(
-            status="received",
-            message="No matching booking and no lockerName; event recorded only.",
-        )
-
-    unit_result = await db.execute(
+        return None
+    result = await db.execute(
         select(LockerUnit).where(LockerUnit.smiota_locker_name == body.lockerName)
     )
-    unit = unit_result.scalar_one_or_none()
-
-    if not unit:
+    units = result.scalars().all()
+    if len(units) > 1:
         logger.warning(
-            "PackageDeposited restock for unknown locker_name=%s object_id=%s",
+            "Smiota lockerName %s is mapped to %d cabinets; cannot tell them apart.",
             body.lockerName,
+            len(units),
+        )
+        return None
+    return units[0] if units else None
+
+
+async def _active_booking_for_drone(
+    drone_id: str, db: AsyncSession, statuses: tuple[str, ...] | None = None
+) -> Booking | None:
+    query = select(Booking).where(
+        Booking.drone_id == drone_id,
+        Booking.status.notin_(_NOT_ACTIVE_STATUSES),
+    )
+    if statuses:
+        query = query.where(Booking.status.in_(statuses))
+    result = await db.execute(query.order_by(Booking.created_at.desc()).limit(1))
+    return result.scalars().first()
+
+
+async def _drone_has_open_booking(drone_id: str, db: AsyncSession) -> bool:
+    """Any booking still holding this drone, including an unpaid checkout."""
+    result = await db.execute(
+        select(Booking.id)
+        .where(
+            Booking.drone_id == drone_id,
+            Booking.status.notin_(TERMINAL_BOOKING_STATUSES),
+        )
+        .limit(1)
+    )
+    return result.scalar_one_or_none() is not None
+
+
+async def _resolve_booking(
+    body: SmiotaWebhookRequest,
+    unit: LockerUnit | None,
+    db: AsyncSession,
+    statuses: tuple[str, ...] | None = None,
+) -> Booking | None:
+    if unit is not None:
+        # The cabinet is known: only its own drone's booking can match. Never
+        # fall back to objectId here, or a same-named drone in another locker
+        # could be handed this cabinet's passcode.
+        if not unit.current_drone_id:
+            return None
+        return await _active_booking_for_drone(unit.current_drone_id, db, statuses)
+
+    query = select(Booking).where(
+        Booking.smiota_object_id == body.objectId,
+        Booking.status.notin_(_NOT_ACTIVE_STATUSES),
+    )
+    if statuses:
+        query = query.where(Booking.status.in_(statuses))
+    matches = (await db.execute(query.limit(2))).scalars().all()
+    if len(matches) > 1:
+        logger.warning(
+            "Smiota objectId %s matches more than one active booking and no lockerName "
+            "identifies the cabinet; leaving the event unmatched.",
             body.objectId,
         )
-        event.processing_status = "unmatched"
-        event.error_message = f"No locker unit found for lockerName '{body.lockerName}'."
-        db.add(event)
-        await db.flush()
-        return SmiotaWebhookResponse(
-            status="received",
-            message="No locker unit found for this lockerName; event recorded only.",
-        )
+        return None
+    return matches[0] if matches else None
 
+
+async def _unit_for_drone(drone_id: str, db: AsyncSession) -> LockerUnit | None:
+    result = await db.execute(select(LockerUnit).where(LockerUnit.current_drone_id == drone_id))
+    return result.scalar_one_or_none()
+
+
+def _hold_deposit_on_unit(unit: LockerUnit, body: SmiotaWebhookRequest) -> None:
+    """Record the deposit currently sitting in this cabinet. The objectId and
+    courier code describe THIS deposit only; they are cleared when it is
+    picked up (see _clear_deposit_from_unit) and replaced by the next one."""
     unit.current_passcode = body.passcode
     unit.smiota_metadata = {
         **(unit.smiota_metadata or {}),
         "pending_deposit_object_id": body.objectId,
         "pending_deposit_courier_code": body.courierCode,
     }
+
+
+def _clear_deposit_from_unit(unit: LockerUnit) -> None:
+    """The deposit has been taken out: forget its passcode and Smiota ids.
+    The cabinet keeps its drone link (current_drone_id) — only an admin
+    unlinks a drone from its cabinet."""
+    unit.current_passcode = None
+    metadata = dict(unit.smiota_metadata or {})
+    metadata.pop("pending_deposit_object_id", None)
+    metadata.pop("pending_deposit_courier_code", None)
+    unit.smiota_metadata = metadata
+
+
+async def _record(event: SmiotaEvent, db: AsyncSession, status_value: str, error: str | None = None) -> None:
+    event.processed = status_value in {"processed", "ignored"}
+    event.processing_status = status_value
+    event.error_message = error
+    db.add(event)
+    await db.flush()
+
+
+# --------------------------------------------------------------------------- #
+# Restock handling (PackageDeposited not fulfilling a waiting booking)
+# --------------------------------------------------------------------------- #
+
+async def _handle_restock_deposit(
+    body: SmiotaWebhookRequest, unit: LockerUnit | None, event: SmiotaEvent, db: AsyncSession
+) -> SmiotaWebhookResponse:
+    """
+    A drone went into a cabinet and no booking is waiting for it. This is
+    either staff stocking the locker or a renter dropping the drone back off
+    at the end of a rental. Either way the cabinet now holds this deposit:
+    keep its passcode and Smiota ids on the cabinet so the next booking of
+    the cabinet's drone picks them up (create_booking / activate_paid_booking).
+
+    The cabinet's drone is marked available here only when nothing is still
+    holding it. A drone deposited mid-return stays `rented` until the renter
+    completes the return (booking_service.complete_return frees it), so it
+    can't be booked by someone else while the return is still in progress.
+    """
+    if unit is None:
+        reason = (
+            f"No locker unit found for lockerName '{body.lockerName}'."
+            if body.lockerName
+            else "No matching booking and no lockerName to resolve a restock target."
+        )
+        logger.warning(
+            "PackageDeposited could not be matched to a cabinet. locker_name=%s object_id=%s",
+            body.lockerName,
+            body.objectId,
+        )
+        await _record(event, db, "unmatched", reason)
+        return SmiotaWebhookResponse(status="received", message=f"{reason} Event recorded only.")
+
+    _hold_deposit_on_unit(unit, body)
     db.add(unit)
 
     drone = None
@@ -135,41 +254,32 @@ async def _handle_restock_deposit(
         drone_result = await db.execute(select(Drone).where(Drone.id == unit.current_drone_id))
         drone = drone_result.scalar_one_or_none()
 
-    if drone:
-        if drone.status == "damaged":
-            logger.warning(
-                "PackageDeposited for damaged drone %s in locker %s — leaving status as damaged.",
-                drone.id,
-                unit.id,
-            )
-        else:
-            drone.status = "available"
-            db.add(drone)
-            logger.info(
-                "PackageDeposited — drone %s marked available (restock, locker %s)",
-                drone.id,
-                unit.id,
-            )
-    else:
+    message = "Deposit recorded; no drone assigned to this locker yet."
+    if drone is None:
         logger.warning(
-            "PackageDeposited — locker %s (name=%s) has no drone assigned; passcode stored but no drone marked available.",
+            "PackageDeposited — locker %s (name=%s) has no drone assigned; passcode stored only.",
             unit.id,
             body.lockerName,
         )
+    elif drone.status == "damaged":
+        message = "Deposit recorded; drone is marked damaged and stays unavailable."
+        logger.warning("PackageDeposited for damaged drone %s in locker %s — left damaged.", drone.id, unit.id)
+    elif await _drone_has_open_booking(drone.id, db):
+        message = "Deposit recorded; drone stays held until its current booking finishes."
+        logger.info(
+            "PackageDeposited — drone %s back in locker %s; booking still open, status left as %s.",
+            drone.id,
+            unit.id,
+            drone.status,
+        )
+    else:
+        drone.status = "available"
+        db.add(drone)
+        message = "Restock deposit processed; drone marked available."
+        logger.info("PackageDeposited — drone %s marked available (locker %s)", drone.id, unit.id)
 
-    event.processed = True
-    event.processing_status = "processed"
-    db.add(event)
-    await db.flush()
-
-    return SmiotaWebhookResponse(
-        status="processed",
-        message=(
-            "Restock deposit processed; drone marked available."
-            if drone
-            else "Deposit recorded; no drone assigned to this locker yet."
-        ),
-    )
+    await _record(event, db, "processed")
+    return SmiotaWebhookResponse(status="processed", message=message)
 
 
 # --------------------------------------------------------------------------- #
@@ -182,17 +292,16 @@ async def process_smiota_webhook(
     """
     Process an incoming Smiota webhook event.
 
-    Supported notification_type values:
-      - PackageDeposited : Drone placed in locker.
-          * If an existing booking references this objectId (drone was already
-            reserved and is being fulfilled), store the passcode on that
-            booking and mark it ready for pickup.
-          * If no booking references this objectId yet, this is a *restock*
-            event — staff loaded a drone into a locker ahead of any
-            reservation. Resolve the locker by lockerName, mark its assigned
-            drone available, and hold the passcode on the LockerUnit until a
-            customer books it (see create_booking(), which reads it back).
-      - PackagePickedUp  : User picked up drone → audit only; iOS drives verification states
+      - PackageDeposited : A drone went into a cabinet.
+          * If the cabinet's drone has a booking waiting for pickup, the
+            passcode goes on that booking and it becomes ready_for_pickup.
+          * Otherwise (staff restock, or a renter's return drop-off) the
+            deposit is held on the cabinet for the next booking; see
+            _handle_restock_deposit.
+      - PackagePickedUp  : The drone was taken out. Audit only for the
+          booking (the app still drives locker-opened, QR verification,
+          photos and start-use); the cabinet's passcode and deposit ids are
+          cleared. The drone STAYS linked to its cabinet.
     """
 
     # 1. Log raw event to smiota_events table
@@ -217,56 +326,17 @@ async def process_smiota_webhook(
         event.processing_status,
     )
 
-    # 2. Find matching booking via smiota_object_id
-    booking_result = await db.execute(
-        select(Booking).where(Booking.smiota_object_id == body.objectId)
-    )
-    booking = booking_result.scalar_one_or_none()
+    unit = await _resolve_unit(body, db)
 
-    if not booking:
-        if body.notification_type == "PackageDeposited":
-            return await _handle_restock_deposit(body, event, db)
-
-        logger.warning(
-            "Smiota event received for unknown objectId: %s (type: %s)",
-            body.objectId,
-            body.notification_type,
-        )
-        event.processing_status = "unmatched"
-        event.error_message = "No matching booking found for this Smiota object ID."
-        db.add(event)
-        await db.flush()
-        return SmiotaWebhookResponse(
-            status="received",
-            message="No matching booking found for this Smiota object ID.",
-        )
-
-    # 3. Handle event types
+    # 2. PackageDeposited
     if body.notification_type == "PackageDeposited":
-        if booking.status not in {"reserved", "ready_for_pickup"}:
-            logger.warning(
-                "Ignoring PackageDeposited for booking %s in status %s",
-                booking.id,
-                booking.status,
-            )
-            event.processed = True
-            event.processing_status = "ignored"
-            event.error_message = "Booking is no longer awaiting pickup."
-            db.add(event)
-            await db.flush()
-            return SmiotaWebhookResponse(
-                status="received",
-                message="Event ignored because booking is no longer awaiting pickup.",
-                booking_id=booking.id,
-            )
+        booking = await _resolve_booking(body, unit, db, statuses=_AWAITING_PICKUP_STATUSES)
+        if booking is None:
+            return await _handle_restock_deposit(body, unit, event, db)
 
         if booking.status == "ready_for_pickup" and booking.smiota_passcode:
             logger.info("Duplicate PackageDeposited ignored for booking %s", booking.id)
-            event.processed = True
-            event.processing_status = "ignored"
-            event.error_message = "Duplicate deposit event ignored."
-            db.add(event)
-            await db.flush()
+            await _record(event, db, "ignored", "Duplicate deposit event ignored.")
             return SmiotaWebhookResponse(
                 status="received",
                 message="Duplicate deposit event ignored.",
@@ -277,90 +347,71 @@ async def process_smiota_webhook(
         booking.smiota_passcode = body.passcode
         booking.smiota_locker_name = body.lockerName
         booking.smiota_courier_code = body.courierCode
+        booking.smiota_object_id = body.objectId
         if booking.status == "reserved":
             booking.status = "ready_for_pickup"
             booking.ready_for_pickup_at = datetime.now(timezone.utc)
         db.add(booking)
 
-        # Also write the passcode directly onto the cabinet so admins can reveal it.
-        if booking.drone_id and body.passcode:
-            unit_result = await db.execute(
-                select(LockerUnit).where(LockerUnit.current_drone_id == booking.drone_id)
-            )
-            unit = unit_result.scalar_one_or_none()
-            if unit:
-                unit.current_passcode = body.passcode
-                db.add(unit)
-                logger.info(
-                    "PackageDeposited — cabinet %s passcode stored | locker: %s",
-                    unit.id,
-                    body.lockerName,
-                )
-            else:
-                logger.warning(
-                    "PackageDeposited — no locker unit found for drone_id %s",
-                    booking.drone_id,
-                )
+        # Also hold the deposit on the cabinet so admins can reveal it.
+        target_unit = unit or (await _unit_for_drone(booking.drone_id, db) if booking.drone_id else None)
+        if target_unit is not None:
+            _hold_deposit_on_unit(target_unit, body)
+            db.add(target_unit)
+        else:
+            logger.warning("PackageDeposited — no locker unit found for drone_id %s", booking.drone_id)
 
-        logger.info(
-            "PackageDeposited — booking %s ready for pickup | locker: %s",
-            booking.id,
-            body.lockerName,
+        logger.info("PackageDeposited — booking %s ready for pickup | locker: %s", booking.id, body.lockerName)
+        await _record(event, db, "processed")
+        return SmiotaWebhookResponse(
+            status="processed",
+            message="Event 'PackageDeposited' handled successfully.",
+            booking_id=booking.id,
         )
 
-    elif body.notification_type == "PackagePickedUp":
-        # Audit only. The app must still confirm locker opened, QR verification,
-        # before photos, and explicit start-use before reaching in_use.
+    # 3. PackagePickedUp
+    if body.notification_type == "PackagePickedUp":
+        booking = await _resolve_booking(body, unit, db)
+        if booking is None:
+            logger.warning(
+                "PackagePickedUp with no active booking | locker_name=%s object_id=%s",
+                body.lockerName,
+                body.objectId,
+            )
+            await _record(event, db, "unmatched", "No active booking found for this pickup.")
+            return SmiotaWebhookResponse(
+                status="received",
+                message="No active booking found for this pickup.",
+            )
+
         drone_result = await db.execute(select(Drone).where(Drone.id == booking.drone_id))
         drone = drone_result.scalar_one_or_none()
         if drone:
             drone.status = "rented"
             db.add(drone)
 
-        # Clear the cabinet passcode — drone is no longer inside.
-        if booking.drone_id:
-            unit_result = await db.execute(
-                select(LockerUnit).where(LockerUnit.current_drone_id == booking.drone_id)
-            )
-            unit = unit_result.scalar_one_or_none()
-            if unit:
-                unit.current_passcode = None
-                # Drone has physically left this locker — clear the FK so
-                # list_drones()'s "genuinely deposited" check stops treating
-                # it as still present. It will be reassigned to a locker
-                # (this one or another) only by a future real
-                # PackageDeposited webhook, not implicitly.
-                unit.current_drone_id = None
-                unit.status = "available"
-                db.add(unit)
+        # The drone is out of the cabinet: clear that deposit's passcode and
+        # ids, but keep the cabinet's link to its drone. The drone comes back
+        # to this cabinet on return; only an admin unlinks it.
+        target_unit = unit or (await _unit_for_drone(booking.drone_id, db) if booking.drone_id else None)
+        if target_unit is not None:
+            _clear_deposit_from_unit(target_unit)
+            db.add(target_unit)
 
-        logger.info(
-            "PackagePickedUp — booking %s audited | drone %s remains rented",
-            booking.id,
-            booking.drone_id,
-        )
-
-    else:
-        logger.warning("Unrecognized Smiota notification_type: %s", body.notification_type)
-        event.error_message = f"Unrecognized notification_type: {body.notification_type}"
-
-    # 4. Mark event as processed
-    event.processed = True
-    event.processing_status = "processed" if not event.error_message else "failed"
-    db.add(event)
-    await db.flush()
-
-    if event.processing_status == "failed":
+        logger.info("PackagePickedUp — booking %s audited | drone %s rented", booking.id, booking.drone_id)
+        await _record(event, db, "processed")
         return SmiotaWebhookResponse(
-            status="failed",
-            message=event.error_message or f"Event '{body.notification_type}' failed.",
+            status="processed",
+            message="Event 'PackagePickedUp' handled successfully.",
             booking_id=booking.id,
         )
 
+    # 4. Anything else
+    logger.warning("Unrecognized Smiota notification_type: %s", body.notification_type)
+    await _record(event, db, "failed", f"Unrecognized notification_type: {body.notification_type}")
     return SmiotaWebhookResponse(
-        status="processed",
-        message=f"Event '{body.notification_type}' handled successfully.",
-        booking_id=booking.id,
+        status="failed",
+        message=f"Unrecognized notification_type: {body.notification_type}",
     )
 
 

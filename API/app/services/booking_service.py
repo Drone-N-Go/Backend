@@ -927,21 +927,14 @@ async def complete_return(
     if drone:
         db.add(drone)
 
-    # Defensive cleanup: this method does not know which physical locker
-    # (if any) the drone was actually dropped back into — that only becomes
-    # known from a real future PackageDeposited webhook, same as first-time
-    # intake. So never set LockerUnit.current_drone_id here. Just make sure
-    # no LockerUnit is left stale, claiming this drone as "currently
-    # deposited" when it has just been returned outside of that flow (e.g.
-    # a drone picked up before the PackagePickedUp fix shipped).
-    if booking.drone_id:
-        stale_units = await db.execute(
-            select(LockerUnit).where(LockerUnit.current_drone_id == booking.drone_id)
-        )
-        for stale_unit in stale_units.scalars().all():
-            stale_unit.current_drone_id = None
-            stale_unit.current_passcode = None
-            db.add(stale_unit)
+    # The drone stays linked to its cabinet (LockerUnit.current_drone_id)
+    # through the whole rental and return — only an admin unlinks it — so
+    # setting it `available` here is what puts it back in the catalog.
+    # (2026-11-02: this used to clear the link, which left every returned
+    # drone invisible to renters until someone re-linked it by hand.) The
+    # passcode for the next renter comes from the return's PackageDeposited
+    # webhook, which webhook_service holds on the cabinet whether it lands
+    # before or after this call.
 
     await db.flush()
     logger.info("Booking returned: %s", booking_id)
