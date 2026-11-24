@@ -5,6 +5,8 @@ Outbound transactional email via Resend. Currently used only for the public
 website contact form (see app/api/routers/contact.py), which notifies
 CONTACT_NOTIFY_EMAIL and sets Reply-To to the submitter so a reply goes
 straight back to them.
+
+Also sends forgot-password codes (added 2026-11-24).
 """
 
 import logging
@@ -54,3 +56,34 @@ async def send_contact_form_email(form: ContactFormRequest) -> None:
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="Could not send your message right now. Please try again shortly.",
         )
+
+
+def send_password_reset_email(to_email: str, first_name: str, code: str, ttl_minutes: int) -> None:
+    """Email a one-time password-reset code.
+
+    Raises on failure; the caller logs and swallows it so the API response
+    never reveals whether an account exists or whether delivery worked.
+    """
+    resend.api_key = settings.require_resend_api_key()
+    greeting = f"Hi {_escape_html(first_name)}," if first_name else "Hi,"
+    resend.Emails.send(
+        {
+            "from": settings.password_reset_from_email,
+            "to": [to_email],
+            "subject": f"Your DroneAndGo password reset code: {code}",
+            "html": (
+                f"<p>{greeting}</p>"
+                "<p>Use this code to reset your DroneAndGo password:</p>"
+                f'<p style="font-size:28px;font-weight:700;letter-spacing:6px">{code}</p>'
+                f"<p>It expires in {ttl_minutes} minutes and can only be used once.</p>"
+                "<p>If you didn't ask to reset your password, you can ignore this email. "
+                "Your password won't change unless someone enters this code.</p>"
+            ),
+            "text": (
+                f"{'Hi ' + first_name + ',' if first_name else 'Hi,'}\n\n"
+                f"Your DroneAndGo password reset code is {code}\n\n"
+                f"It expires in {ttl_minutes} minutes and can only be used once. "
+                "If you didn't ask to reset your password, ignore this email."
+            ),
+        }
+    )

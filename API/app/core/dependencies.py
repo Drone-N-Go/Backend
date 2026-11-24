@@ -13,7 +13,7 @@ from sqlalchemy.orm import selectinload
 from dataclasses import dataclass
 
 from app.core.admin_permissions import capabilities_for_role, role_has_capability
-from app.core.security import decode_token
+from app.core.security import decode_token, token_predates_password_change
 from app.db.session import get_db
 from app.models.admin_profile import AdminProfile
 from app.models.user import User
@@ -45,6 +45,12 @@ async def _resolve_user_from_token(token: str, db: AsyncSession) -> User:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User not found.",
+        )
+    if token_predates_password_change(payload, user.password_changed_at):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired access token.",
+            headers={"WWW-Authenticate": "Bearer"},
         )
     return user
 

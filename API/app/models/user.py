@@ -30,6 +30,12 @@ class User(Base):
     # checkout; the card or Apple Pay used is saved to it so later damage or
     # late-return fees can be charged.
     stripe_customer_id: Mapped[str | None] = mapped_column(String(255), nullable=True, unique=True)
+    # Set when the password is reset via the forgot-password flow (added
+    # 2026-11-24). Access tokens issued before this moment are rejected, so a
+    # reset signs the account out everywhere, not just on refresh.
+    password_changed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     role: Mapped[str] = mapped_column(
         String(20),
         nullable=False,

@@ -39,6 +39,20 @@ class RefreshTokenRequest(BaseModel):
     refresh_token: str
 
 
+class PasswordResetRequest(BaseModel):
+    email: EmailStr
+
+
+class PasswordResetConfirmRequest(BaseModel):
+    email: EmailStr
+    code: str = Field(..., min_length=6, max_length=6, pattern=r"^[0-9]{6}$")
+    new_password: str = Field(..., min_length=8, description="Minimum 8 characters")
+
+
+class MessageResponse(BaseModel):
+    message: str
+
+
 class UserUpdateRequest(BaseModel):
     first_name: Optional[str] = Field(None, min_length=1, max_length=100)
     last_name: Optional[str] = Field(None, min_length=1, max_length=100)

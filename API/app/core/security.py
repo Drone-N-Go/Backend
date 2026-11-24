@@ -38,8 +38,10 @@ def verify_password(plain: str, hashed: str) -> bool:
 
 def _create_token(payload: dict, expires_delta: timedelta) -> str:
     """Internal helper — sign a JWT with expiry."""
-    expire = datetime.now(timezone.utc) + expires_delta
-    to_encode = {**payload, "exp": expire}
+    now = datetime.now(timezone.utc)
+    expire = now + expires_delta
+    # iat lets the API reject tokens issued before a password reset.
+    to_encode = {**payload, "iat": int(now.timestamp()), "exp": expire}
     return jwt.encode(to_encode, settings.secret_key, algorithm=settings.jwt_algorithm)
 
 
@@ -74,3 +76,19 @@ def decode_token(token: str) -> Optional[dict]:
         return None
     except jwt.InvalidTokenError:
         return None
+
+
+def token_predates_password_change(payload: dict, password_changed_at: datetime | None) -> bool:
+    """True if this token was issued before the user's last password reset.
+
+    Compared at whole-second precision (JWT iat is in seconds). Tokens without
+    iat predate this check; they are rejected only for users who have reset.
+    """
+    if password_changed_at is None:
+        return False
+    if password_changed_at.tzinfo is None:
+        password_changed_at = password_changed_at.replace(tzinfo=timezone.utc)
+    iat = payload.get("iat")
+    if not isinstance(iat, (int, float)):
+        return True
+    return int(iat) < int(password_changed_at.timestamp())

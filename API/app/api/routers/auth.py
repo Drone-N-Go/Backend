@@ -7,6 +7,8 @@ Authentication endpoints:
   POST /api/auth/logout
   GET  /api/auth/me
   POST /api/auth/refresh
+  POST /api/auth/password-reset/request
+  POST /api/auth/password-reset/confirm
 """
 
 import logging
@@ -18,13 +20,16 @@ from app.core.dependencies import get_current_user
 from app.db.session import get_db
 from app.models.user import User
 from app.schemas.user import (
+    MessageResponse,
+    PasswordResetConfirmRequest,
+    PasswordResetRequest,
     RefreshTokenRequest,
     TokenResponse,
     UserLoginRequest,
     UserRegisterRequest,
     UserResponse,
 )
-from app.services import auth_service
+from app.services import auth_service, password_reset_service
 from app.core.config import get_settings
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
@@ -133,3 +138,40 @@ async def refresh(
     token_data = await auth_service.refresh_access_token(token, db)
     _set_auth_cookies(response, token_data)
     return token_data
+
+
+# --------------------------------------------------------------------------- #
+# Forgot password (added 2026-11-24). Used by the admin apps and consumer apps.
+# --------------------------------------------------------------------------- #
+
+@router.post(
+    "/password-reset/request",
+    response_model=MessageResponse,
+    status_code=202,
+    summary="Email a one-time password reset code",
+)
+async def request_password_reset(
+    body: PasswordResetRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    message = await password_reset_service.request_reset(body.email, db)
+    return MessageResponse(message=message)
+
+
+@router.post(
+    "/password-reset/confirm",
+    response_model=MessageResponse,
+    summary="Set a new password using the emailed code",
+)
+async def confirm_password_reset(
+    body: PasswordResetConfirmRequest,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+):
+    message = await password_reset_service.confirm_reset(
+        body.email, body.code, body.new_password, db
+    )
+    # Clear any browser session cookies; the user signs in again.
+    response.delete_cookie("access_token")
+    response.delete_cookie("refresh_token")
+    return MessageResponse(message=message)

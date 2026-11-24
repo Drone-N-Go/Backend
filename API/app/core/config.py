@@ -105,6 +105,21 @@ class Settings(BaseSettings):
     max_login_attempts: int = 5
     lockout_minutes: int = 15
 
+    # ------------------------------------------------------------------ #
+    # Forgot-password flow (added 2026-11-24)
+    # ------------------------------------------------------------------ #
+    # Sender for password-reset emails (must be on the Resend-verified domain).
+    password_reset_from_email: str = "DroneAndGo <noreply@droneandgo.io>"
+    password_reset_code_ttl_minutes: int = 15
+    # Wrong guesses allowed on one code before it is burned.
+    password_reset_max_code_attempts: int = 5
+    # Codes that may be emailed to one account per rolling window.
+    password_reset_max_requests_per_window: int = 3
+    password_reset_request_window_minutes: int = 15
+    # Wrong guesses allowed per account across all codes per day. This is the
+    # real brute-force cap on a 6-digit code: 10/day = ~0.4% odds per year.
+    password_reset_max_daily_failures: int = 10
+
     @property
     def is_production(self) -> bool:
         return self.app_env == "production"

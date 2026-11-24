@@ -11,6 +11,7 @@ from app.models.locker_location import LockerLocation
 from app.models.locker_unit import LockerUnit
 from app.models.login_attempt import LoginAttempt
 from app.models.maintenance_task import MaintenanceTask
+from app.models.password_reset_code import PasswordResetCode
 from app.models.refresh_token import RefreshToken
 from app.models.smiota_event import SmiotaEvent
 from app.models.stripe_event import StripeEvent
@@ -31,6 +32,7 @@ __all__ = [
     "LockerUnit",
     "LoginAttempt",
     "MaintenanceTask",
+    "PasswordResetCode",
     "RefreshToken",
     "SmiotaEvent",
     "StripeEvent",

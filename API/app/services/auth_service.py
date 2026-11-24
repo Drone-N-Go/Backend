@@ -19,6 +19,7 @@ from app.core.security import (
     create_refresh_token,
     decode_token,
     hash_password,
+    token_predates_password_change,
     verify_password,
 )
 from app.models.login_attempt import LoginAttempt
@@ -236,10 +237,10 @@ async def refresh_access_token(refresh_token: str, db: AsyncSession) -> TokenRes
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
 
-    if not user:
+    if not user or token_predates_password_change(payload, user.password_changed_at):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User not found.",
+            detail="Invalid or expired refresh token.",
         )
 
     token_record.revoked = True
